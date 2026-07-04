@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Retrieval Gating Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">RG</div>
+          <div>
+            <div class="brand-title">Retrieval Gating</div>
+            <div class="brand-subtitle">Local Prototype</div>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-item active" data-view="chat" type="button">对话决策</button>
+          <button class="nav-item" data-view="docs" type="button">Docs</button>
+          <button class="nav-item" data-view="settings" type="button">配置说明</button>
+        </nav>
+
+        <div class="status-panel">
+          <div class="status-row">
+            <span>后端状态</span>
+            <strong id="apiStatus">未检查</strong>
+          </div>
+          <button class="secondary-button compact" id="healthButton" type="button">检查连接</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="view active" id="view-chat">
+          <header class="page-header">
+            <div>
+              <p class="eyebrow">Decision Debugger</p>
+              <h1>从用户问题判断应该检索哪些子系统</h1>
+            </div>
+            <div class="selected-summary" id="selectedSummary">暂无结果</div>
+          </header>
+
+          <div class="decision-layout">
+            <section class="query-panel">
+              <div class="section-title">
+                <span class="step">输入</span>
+                <h2>用户问题</h2>
+              </div>
+              <form class="composer" id="decideForm">
+                <textarea id="taskInput" rows="5" placeholder="例如：我可以吃海鲜吗？"></textarea>
+                <div class="composer-actions">
+                  <button class="primary-button" type="submit">生成候选系统</button>
+                </div>
+              </form>
+              <div class="message-list" id="messageList"></div>
+            </section>
+
+            <section class="systems-panel">
+              <div class="section-title horizontal">
+                <div>
+                  <span class="step">输出</span>
+                  <h2>候选系统</h2>
+                </div>
+                <span class="meta" id="latencyText">-</span>
+              </div>
+              <div class="system-list" id="systemList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-docs">
+          <header class="page-header">
+            <div>
+              <p class="eyebrow">Source Documents</p>
+              <h1>查看离线灌入的文档摘要</h1>
+            </div>
+            <button class="secondary-button" id="loadExampleButton" type="button">加载示例 docs</button>
+          </header>
+
+          <section class="docs-panel">
+            <div class="docs-toolbar">
+              <label class="file-picker">
+                <span>选择 JSON / JSONL</span>
+                <input id="docsFileInput" type="file" accept=".json,.jsonl,application/json" />
+              </label>
+              <input id="docsFilterInput" type="search" placeholder="按 doc_id、system_id、summary、keywords 过滤" />
+            </div>
+            <div class="docs-grid" id="docsGrid"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-settings">
+          <header class="page-header">
+            <div>
+              <p class="eyebrow">Scoring Reference</p>
+              <h1>评分配置说明</h1>
+            </div>
+            <button class="secondary-button" id="copyEnvButton" type="button">复制 .env 片段</button>
+          </header>
+
+          <div class="callout">
+            <strong>重要：这个页面不会直接修改后端，也不会让配置立即生效。</strong>
+            <p>
+              这里生成的是配置草案。需要手动复制 `.env` 片段到项目根目录的 `.env` 文件中，然后重启后端服务。
+              已加载的模型、索引和决策引擎实例不会因为浏览器页面变化而自动刷新。
+            </p>
+          </div>
+
+          <div class="settings-layout">
+            <section class="settings-card">
+              <div class="section-title">
+                <span class="step">请求</span>
+                <h2>请求规模</h2>
+              </div>
+              <div class="field-row">
+                <label for="apiBaseInput">API Base</label>
+                <input id="apiBaseInput" type="text" />
+                <p>默认值：当前页面 origin。通过 FastAPI 静态页面访问时通常不用改。</p>
+              </div>
+              <div class="field-row">
+                <label for="topKInput">DEFAULT_TOP_K_DOCS</label>
+                <input id="topKInput" type="number" min="1" max="200" step="1" />
+                <p>默认值：50。每次决策最多保留多少个候选文档。更大通常召回更充分，但也可能引入更多噪声。</p>
+              </div>
+              <div class="field-row">
+                <label for="maxSystemsInput">DEFAULT_MAX_SYSTEMS</label>
+                <input id="maxSystemsInput" type="number" min="1" max="20" step="1" />
+                <p>默认值：5。最多返回多少个候选系统。它控制展示数量，不代表这些系统都会被选中。</p>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="section-title">
+                <span class="step">权重</span>
+                <h2>系统选择</h2>
+              </div>
+              <div class="field-row">
+                <label for="thresholdInput">SYSTEM_SELECTION_THRESHOLD</label>
+                <input id="thresholdInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.75。系统 confidence 大于等于这个阈值时，进入最终的 selected_systems。</p>
+              </div>
+              <div class="field-row">
+                <label for="bm25WeightInput">BM25_RANK_WEIGHT</label>
+                <input id="bm25WeightInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.75。BM25 排名信号的上限。rank 1 的 BM25 文档最多贡献这个分数。</p>
+              </div>
+              <div class="field-row">
+                <label for="keywordBoostInput">KEYWORD_BOOST_PER_MATCH</label>
+                <input id="keywordBoostInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.02。每命中一个关键词时追加的分数。</p>
+              </div>
+              <div class="field-row">
+                <label for="keywordBoostMaxInput">KEYWORD_BOOST_MAX</label>
+                <input id="keywordBoostMaxInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.10。关键词追加分的上限，避免关键词数量过多导致误选。</p>
+              </div>
+            </section>
+
+            <section class="formula-card">
+              <div class="section-title">
+                <span class="step">公式</span>
+                <h2>当前 MVP 评分逻辑</h2>
+              </div>
+              <div class="formula-flow">
+                <div>
+                  <strong>1. BM25 排名分</strong>
+                  <code>bm25_rank_score = BM25_RANK_WEIGHT * max(0, 1 - (bm25_rank - 1) / 50)</code>
+                </div>
+                <div>
+                  <strong>2. 关键词加分</strong>
+                  <code>keyword_boost = min(KEYWORD_BOOST_MAX, KEYWORD_BOOST_PER_MATCH * matched_keyword_count)</code>
+                </div>
+                <div>
+                  <strong>3. 单文档强度</strong>
+                  <code>doc_strength = clamp(max(vector_score, bm25_rank_score, vector_rank_score) + keyword_boost, 0, 1)</code>
+                </div>
+                <div>
+                  <strong>4. 系统选择</strong>
+                  <code>system_confidence = max(doc_strength of docs in this system)</code>
+                  <code>selected = system_confidence >= SYSTEM_SELECTION_THRESHOLD</code>
+                </div>
+              </div>
+              <div class="formula-note">
+                <p><strong>核心含义：</strong>文档只是证据，最终输出的是 system_id。系统 confidence 使用该系统下最强的一条文档证据，不做多文档求和。</p>
+              </div>
+            </section>
+
+            <section class="env-card">
+              <div class="section-title horizontal">
+                <div>
+                  <span class="step">复制</span>
+                  <h2>.env 片段</h2>
+                </div>
+                <span class="meta">手动粘贴后重启后端</span>
+              </div>
+              <pre id="envPreview"></pre>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
