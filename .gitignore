@@ -14,3 +14,4 @@ BAAI/
 .uv-cache/
 .uv-python/
 .pycache-tmp/
+.tmp/
