@@ -1,0 +1,58 @@
+import math
+
+import pytest
+
+from app.embedding.embedding_service import MockEmbeddingService
+from app.offline.local_index_builder import LocalIndexBuilder
+from app.retrieval.local_bm25_retriever import LocalBM25Retriever
+from app.retrieval.local_faiss_retriever import LocalFaissRetriever
+from app.schemas.doc import SourceDoc
+from app.storage.local_artifact_store import LocalArtifactStore
+
+
+@pytest.mark.asyncio
+async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> None:
+    docs = [
+        SourceDoc(
+            doc_id="memo_doc_001",
+            system_id="memo_system",
+            summary="The memo records a shanghai business trip meeting plan.",
+            keywords=["memo", "shanghai", "trip", "meeting"],
+        ),
+        SourceDoc(
+            doc_id="album_doc_001",
+            system_id="album_system",
+            summary="The album contains meeting photos from the shanghai trip.",
+            keywords=["album", "photo", "shanghai", "trip", "meeting"],
+        ),
+    ]
+    artifact_store = LocalArtifactStore(tmp_path)
+    embedding_service = MockEmbeddingService(dim=16)
+
+    result = await LocalIndexBuilder(
+        artifact_store=artifact_store,
+        embedding_service=embedding_service,
+    ).build(docs)
+
+    assert result.doc_count == 2
+    assert result.embedding_dim == 16
+    assert artifact_store.docs_path.exists()
+    assert artifact_store.bm25_path.exists()
+    assert artifact_store.faiss_path.exists()
+    assert artifact_store.faiss_doc_ids_path.exists()
+    assert artifact_store.manifest_path.exists()
+
+    bm25_hits = await LocalBM25Retriever(artifact_store).search("shanghai trip meeting", top_k=5)
+    assert bm25_hits
+    assert {hit.doc_id for hit in bm25_hits} == {"memo_doc_001", "album_doc_001"}
+    assert all(hit.bm25_score is not None for hit in bm25_hits)
+
+    vector_hits = await LocalFaissRetriever(artifact_store, embedding_service).search(
+        "shanghai trip meeting",
+        top_k=2,
+    )
+    assert len(vector_hits) == 2
+    assert all(hit.vector_rank is not None for hit in vector_hits)
+    assert all(
+        hit.vector_score is not None and math.isfinite(hit.vector_score) for hit in vector_hits
+    )

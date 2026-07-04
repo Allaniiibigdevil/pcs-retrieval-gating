@@ -7,12 +7,14 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
-    "httpx",
-    "elasticsearch",
-    "asyncpg",
     "numpy",
     "python-dotenv",
-    "aiohttp",
+    "huggingface-hub>=1.22.0",
+    "rank-bm25",
+    "jieba",
+    "setuptools<81",
+    "sentence-transformers",
+    "faiss-cpu",
 ]
 
 [project.optional-dependencies]

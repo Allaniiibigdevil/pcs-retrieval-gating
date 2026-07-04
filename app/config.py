@@ -8,21 +8,25 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "retrieval-gating-service"
     APP_ENV: str = "local"
+    APP_MODE: str = "local"
 
-    ES_URL: str = "http://localhost:9200"
-    ES_INDEX_NAME: str = "source_docs"
+    LOCAL_DATA_DIR: str = "data"
+    LOCAL_RAW_DOCS_PATH: str = "data/raw/docs.jsonl"
+    LOCAL_ARTIFACT_DIR: str = "data/artifacts"
 
-    GAUSSDB_DSN: str = "postgresql://user:password@localhost:5432/retrieval"
-    GAUSSDB_VECTOR_TABLE: str = "source_doc_vectors"
-
-    EMBEDDING_PROVIDER: str = "mock"
-    EMBEDDING_DIM: int = 384
+    EMBEDDING_PROVIDER: str = "bge"
+    EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
+    EMBEDDING_DIM: int = 512
 
     DEFAULT_TOP_K_DOCS: int = 50
     DEFAULT_MAX_SYSTEMS: int = 5
+    BM25_TOP_K: int = 50
+    VECTOR_TOP_K: int = 50
 
-    RETRIEVE_THRESHOLD: float = 0.80
-    MAYBE_RETRIEVE_THRESHOLD: float = 0.55
+    SYSTEM_SELECTION_THRESHOLD: float = 0.75
+    BM25_RANK_WEIGHT: float = 0.75
+    KEYWORD_BOOST_PER_MATCH: float = 0.02
+    KEYWORD_BOOST_MAX: float = 0.10
 
 
 @lru_cache

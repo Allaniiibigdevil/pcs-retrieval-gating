@@ -20,7 +20,7 @@ class EvidenceDoc(BaseModel):
 
 class SystemDecision(BaseModel):
     system_id: str
-    decision: str
+    selected: bool
     confidence: float
     evidence_docs: list[EvidenceDoc]
     reason: str
@@ -29,5 +29,6 @@ class SystemDecision(BaseModel):
 class DecideResponse(BaseModel):
     task_id: str | None = None
     task: str
+    selected_systems: list[str] = Field(default_factory=list)
     decisions: list[SystemDecision]
     latency_ms: dict[str, float] = Field(default_factory=dict)

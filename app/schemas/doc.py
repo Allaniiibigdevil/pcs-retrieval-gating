@@ -11,12 +11,3 @@ class SourceDoc(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
-
-
-class UpsertDocRequest(SourceDoc):
-    pass
-
-
-class UpsertDocResponse(BaseModel):
-    doc_id: str
-    status: str

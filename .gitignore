@@ -9,3 +9,8 @@ venv/
 dist/
 build/
 *.egg-info/
+data/
+BAAI/
+.uv-cache/
+.uv-python/
+.pycache-tmp/

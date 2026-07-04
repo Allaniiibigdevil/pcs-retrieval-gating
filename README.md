@@ -1,110 +1,276 @@
 # Retrieval Gating Service
 
-Python FastAPI MVP for turning document-level retrieval evidence into system-level retrieval decisions.
-
-The important product boundary is:
+这是一个本地优先的检索门控原型服务。它的目标不是给文档做最终排序，而是根据当前用户任务判断应该检索哪些子系统。
 
 ```text
-user task -> relevant document evidence -> subsystem decision
+用户任务
+  -> BM25 / FAISS 找到相关文档证据
+  -> 聚合到 system_id
+  -> 输出 selected_systems
 ```
 
-Documents are evidence. The final output is which source subsystems should be retrieved, not a document ranking.
+当前分支只维护本地模式，不实现 Elasticsearch 和 GaussDB 路径。
 
-## Structure
+## 当前实现
+
+本地链路：
+
+```text
+离线灌入 SourceDoc
+  -> 使用 jieba + 字符 n-gram 构建本地 BM25 索引
+  -> 使用 BGE 生成文档向量
+  -> 构建本地 FAISS 索引
+  -> 在线 FastAPI 加载本地 artifacts
+  -> /v1/decide 输出需要检索的子系统列表
+```
+
+本地模式特征：
+
+- 不提供实时文档写入接口。
+- 文档通过离线命令灌入和建索引。
+- BM25 使用本地 artifact。
+- 向量检索使用本地 FAISS artifact。
+- embedding 默认使用 `BAAI/bge-small-zh-v1.5`。
+- `/v1/decide` 的核心输出是 `selected_systems`。
+
+## 目录结构
 
 ```text
 app/
-  api/            FastAPI routers
-  schemas/        Pydantic request/response models
-  embedding/      Mock embedding abstraction
-  indexing/       Elasticsearch and GaussDB write adapters
-  retrieval/      Elasticsearch and vector search adapters, candidate merge
-  decision/       normalization, evidence, aggregation, decision engine
-  utils/          timing and helpers
-tests/            unit tests for core decision logic
+  api/            FastAPI 路由
+  decision/       query 处理、证据增强、系统聚合、决策引擎
+  embedding/      mock embedding 和 BGE embedding
+  offline/        本地离线灌入和索引构建命令
+  retrieval/      本地 BM25、本地 FAISS、候选合并、retriever factory
+  schemas/        Pydantic 请求 / 响应模型
+  storage/        本地 JSONL 文档存储和 artifact 存储
+  utils/          日志、计时等工具
+
+data/
+  raw/            本地原始文档，git 忽略
+  artifacts/      生成的 BM25 / FAISS artifacts，git 忽略
+
+examples/         示例 SourceDoc 输入
+tests/            单元测试
 ```
 
-## Local Setup
+## 使用 uv 准备环境
+
+推荐 Python 3.11：
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
-copy .env.example .env
+uv python install 3.11
+uv venv --python 3.11 --clear
+uv sync --extra dev
 ```
 
-Start the API:
+如果 Windows 上全局 cache 或 Python 安装目录有权限问题，可以放到项目目录内：
+
+```powershell
+$env:UV_CACHE_DIR='D:\Code\Python\pcs-retrieval-gating\.uv-cache'
+$env:UV_PYTHON_INSTALL_DIR='D:\Code\Python\pcs-retrieval-gating\.uv-python'
+uv sync --extra dev
+```
+
+## 配置
+
+`.env.example` 中包含主要配置：
+
+```env
+APP_MODE=local
+EMBEDDING_PROVIDER=bge
+EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
+EMBEDDING_DIM=512
+LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
+LOCAL_ARTIFACT_DIR=data/artifacts
+
+SYSTEM_SELECTION_THRESHOLD=0.75
+BM25_RANK_WEIGHT=0.75
+KEYWORD_BOOST_PER_MATCH=0.02
+KEYWORD_BOOST_MAX=0.10
+```
+
+## 查询处理
+
+BM25 和向量检索使用不同的 query：
+
+```text
+BM25 检索：使用 normalized query
+向量检索：使用原始 query
+```
+
+原因：
+
+- BM25 是词法检索，适合做基础归一化和分词。
+- BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
+- 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
+
+## 评分机制
+
+当前评分是 MVP 规则，不是训练出来的模型。单文档强度：
+
+```text
+doc_strength = max(vector_score, bm25_rank_score, vector_rank_score) + keyword_boost
+```
+
+其中：
+
+```text
+bm25_rank_score = BM25_RANK_WEIGHT * max(0, 1 - (bm25_rank - 1) / 50)
+keyword_boost = min(KEYWORD_BOOST_MAX, KEYWORD_BOOST_PER_MATCH * matched_keyword_count)
+```
+
+说明：
+
+- `vector_score`：向量相似度，范围按 0 到 1 使用。
+- `bm25_rank_score`：只使用 BM25 排名位置转成的分数，不直接使用 BM25 原始分。
+- `BM25_RANK_WEIGHT`：降低 BM25 rank 1 的上限，避免词法命中直接等同于强语义命中。
+- `keyword_boost`：命中文档关键词时的少量加分。
+- 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
+- `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
+
+## 离线灌入和建索引
+
+直接使用示例文档构建本地索引：
 
 ```bash
-uvicorn app.main:app --reload
+uv run python -m app.offline.build_index --docs examples/docs.jsonl
 ```
 
-Health check:
+也可以先灌入到本地 raw store，再构建索引：
 
 ```bash
-curl http://localhost:8000/health
+uv run python -m app.offline.ingest examples/docs.jsonl
+uv run python -m app.offline.build_index
 ```
 
-Expected response:
+构建完成后会生成：
+
+```text
+data/artifacts/docs.jsonl
+data/artifacts/bm25.pkl
+data/artifacts/faiss.index
+data/artifacts/faiss_doc_ids.json
+data/artifacts/manifest.json
+```
+
+## 启动服务
+
+```bash
+uv run uvicorn app.main:app --reload
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+预期返回：
 
 ```json
 {"status":"ok"}
 ```
 
-## Environment Variables
+## 调试检索接口
 
-See `.env.example` for all settings. The main values are:
-
-```env
-ES_URL=http://localhost:9200
-ES_INDEX_NAME=source_docs
-GAUSSDB_DSN=postgresql://user:password@localhost:5432/retrieval
-GAUSSDB_VECTOR_TABLE=source_doc_vectors
-EMBEDDING_PROVIDER=mock
-EMBEDDING_DIM=384
-DEFAULT_TOP_K_DOCS=50
-DEFAULT_MAX_SYSTEMS=5
-RETRIEVE_THRESHOLD=0.80
-MAYBE_RETRIEVE_THRESHOLD=0.55
-```
-
-## Upsert Examples
-
-Memo system:
+BM25 检索：
 
 ```bash
-curl -X POST http://localhost:8000/v1/docs/upsert ^
+curl -X POST http://127.0.0.1:8000/v1/search/bm25 ^
   -H "Content-Type: application/json" ^
-  -d "{\"doc_id\":\"memo_doc_001\",\"system_id\":\"memo_system\",\"summary\":\"用户在备忘录中记录了上海出差计划，包括会议时间、客户名称和待办事项。\",\"keywords\":[\"备忘录\",\"出差\",\"上海\",\"会议\",\"待办事项\"],\"metadata\":{\"source\":\"memo_app\",\"doc_type\":\"note_summary\"},\"updated_at\":\"2026-07-02T10:00:00+08:00\"}"
+  -d "{\"query\":\"我可以吃海鲜吗\",\"top_k\":5}"
 ```
 
-Album system:
+兼容接口：
+
+```text
+/v1/search/es
+```
+
+在 `local` 模式下，`/v1/search/es` 是 BM25 检索的 alias。
+
+向量检索：
 
 ```bash
-curl -X POST http://localhost:8000/v1/docs/upsert ^
+curl -X POST http://127.0.0.1:8000/v1/search/vector ^
   -H "Content-Type: application/json" ^
-  -d "{\"doc_id\":\"album_doc_001\",\"system_id\":\"album_system\",\"summary\":\"相册中包含用户在上海出差期间拍摄的会议白板、客户合影和酒店照片。\",\"keywords\":[\"相册\",\"照片\",\"上海\",\"出差\",\"会议白板\",\"客户合影\"],\"metadata\":{\"source\":\"photo_app\",\"doc_type\":\"album_summary\"},\"updated_at\":\"2026-07-02T10:05:00+08:00\"}"
+  -d "{\"query\":\"我可以吃海鲜吗\",\"top_k\":5}"
 ```
 
-## Decision Example
+## 子系统选择接口
 
 ```bash
-curl -X POST http://localhost:8000/v1/decide ^
+curl -X POST http://127.0.0.1:8000/v1/decide ^
   -H "Content-Type: application/json" ^
-  -d "{\"task_id\":\"task_001\",\"task\":\"我想查一下上海出差相关的会议照片和备忘录\",\"top_k_docs\":50,\"max_systems\":5}"
+  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50,\"max_systems\":5}"
 ```
 
-## MVP Notes
+返回示例：
 
-- Uses deterministic mock embeddings by default.
-- Does not use LLM query rewrite.
-- Does not use rerank or cross-encoder rerank.
-- Current scoring is intentionally simple and replaceable.
-- Elasticsearch and GaussDB details are isolated in adapters.
-- Core decision logic can run in unit tests without ES or GaussDB.
+```json
+{
+  "task_id": "task_001",
+  "task": "我可以吃海鲜吗？",
+  "selected_systems": ["notepad"],
+  "decisions": [
+    {
+      "system_id": "notepad",
+      "selected": true,
+      "confidence": 0.84,
+      "evidence_docs": [
+        {
+          "doc_id": "3",
+          "summary": "记录了用户对海鲜过敏",
+          "matched_keywords": ["海鲜过敏"],
+          "bm25_score": 1.2,
+          "vector_score": 0.84,
+          "bm25_rank": 1,
+          "vector_rank": 1
+        }
+      ],
+      "reason": "命中相关关键词：海鲜过敏"
+    }
+  ],
+  "latency_ms": {}
+}
+```
 
-## Tests
+字段含义：
+
+- `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
+- `decisions`：候选子系统的解释信息，用于调试和观察。
+- `selected`：该候选系统是否进入 `selected_systems`。
+- `confidence`：该系统最强证据文档的强度分。
+- `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
+
+## 测试和检查
+
+运行单元测试：
 
 ```bash
-pytest
+uv run pytest -p no:cacheprovider
 ```
+
+运行 Ruff：
+
+```bash
+uv run ruff check --no-cache .
+```
+
+编译检查：
+
+```powershell
+$env:PYTHONPYCACHEPREFIX='D:\Code\Python\pcs-retrieval-gating\.pycache-tmp'
+uv run python -m compileall app tests
+```
+
+## MVP 说明
+
+- 本地模式不使用 ES / GaussDB。
+- 本地模式不提供实时文档写入接口。
+- 文档更新后需要重新运行离线索引构建。
+- BM25 使用 jieba 分词，并补充中文字符 n-gram。
+- 向量检索使用原始 query，不做停用词删除。
+- 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
+- 最终输出目标是子系统选择，不是文档排序。
