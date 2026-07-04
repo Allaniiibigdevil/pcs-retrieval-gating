@@ -74,7 +74,7 @@
           <header class="page-header">
             <div>
               <p class="eyebrow">Source Documents</p>
-              <h1>查看离线灌入的文档摘要</h1>
+              <h1>查看 JSONL 格式的文档摘要</h1>
             </div>
             <button class="secondary-button" id="loadExampleButton" type="button">加载示例 docs</button>
           </header>
@@ -82,11 +82,16 @@
           <section class="docs-panel">
             <div class="docs-toolbar">
               <label class="file-picker">
-                <span>选择 JSON / JSONL</span>
-                <input id="docsFileInput" type="file" accept=".json,.jsonl,application/json" />
+                <span>选择 JSONL</span>
+                <input id="docsFileInput" type="file" accept=".jsonl,application/jsonlines,text/plain" />
               </label>
               <input id="docsFilterInput" type="search" placeholder="按 doc_id、system_id、summary、keywords 过滤" />
             </div>
+            <details class="jsonl-example" id="jsonlExample" open>
+              <summary>JSONL 示例</summary>
+              <pre>{"doc_id":"1","system_id":"photo","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
+{"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{}}</pre>
+            </details>
             <div class="docs-grid" id="docsGrid"></div>
           </section>
         </section>

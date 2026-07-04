@@ -21,6 +21,7 @@ const selectedSummary = document.querySelector("#selectedSummary");
 const latencyText = document.querySelector("#latencyText");
 const docsGrid = document.querySelector("#docsGrid");
 const docsFilterInput = document.querySelector("#docsFilterInput");
+const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
@@ -140,10 +141,6 @@ function parseDocsText(text) {
     return [];
   }
 
-  if (trimmed.startsWith("[")) {
-    return JSON.parse(trimmed);
-  }
-
   return trimmed
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -177,11 +174,11 @@ function renderDocs() {
         <article class="doc-card">
           <div class="doc-topline">
             <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
-            <span class="badge">${escapeHtml(doc.system_id)}</span>
+            <span class="badge system-badge">${escapeHtml(doc.system_id)}</span>
           </div>
           <div class="doc-summary">${escapeHtml(doc.summary || "")}</div>
           <div class="keyword-list">
-            ${(doc.keywords || []).map((item) => `<span class="badge">${escapeHtml(item)}</span>`).join("")}
+            ${(doc.keywords || []).map((item) => `<span class="badge keyword-badge">${escapeHtml(item)}</span>`).join("")}
           </div>
           <div class="doc-meta">${escapeHtml(JSON.stringify(doc.metadata || {}))}</div>
         </article>
@@ -277,9 +274,10 @@ document.querySelector("#docsFileInput").addEventListener("change", async (event
   const text = await file.text();
   try {
     state.docs = parseDocsText(text);
+    jsonlExample.open = false;
     renderDocs();
   } catch (error) {
-    docsGrid.innerHTML = `<div class="error-state">解析失败：${escapeHtml(error.message)}</div>`;
+    docsGrid.innerHTML = `<div class="error-state">JSONL 解析失败：${escapeHtml(error.message)}</div>`;
   }
 });
 
@@ -290,6 +288,7 @@ document.querySelector("#loadExampleButton").addEventListener("click", async () 
       throw new Error(`HTTP ${response.status}`);
     }
     state.docs = parseDocsText(await response.text());
+    jsonlExample.open = false;
     renderDocs();
   } catch (error) {
     docsGrid.innerHTML = `<div class="error-state">加载示例失败：${escapeHtml(error.message)}</div>`;

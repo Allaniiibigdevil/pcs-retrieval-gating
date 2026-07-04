@@ -344,6 +344,10 @@ input:focus {
   padding: 14px;
 }
 
+.doc-card {
+  border-color: rgba(199, 0, 11, 0.28);
+}
+
 .system-card.selected {
   border-left: 4px solid var(--accent);
   border-color: rgba(199, 0, 11, 0.35);
@@ -375,6 +379,18 @@ input:focus {
 .badge.selected {
   background: var(--accent-soft);
   color: var(--accent-dark);
+}
+
+.system-badge {
+  border: 1px solid rgba(199, 0, 11, 0.22);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.keyword-badge {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
 }
 
 .confidence {
@@ -441,7 +457,7 @@ input:focus {
   display: grid;
   grid-template-columns: 190px minmax(240px, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .file-picker input {
@@ -457,6 +473,24 @@ input:focus {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
+  margin-top: 16px;
+}
+
+.jsonl-example {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 12px 14px;
+}
+
+.jsonl-example summary {
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.jsonl-example pre {
+  margin-top: 10px;
 }
 
 .keyword-list {
