@@ -2,8 +2,9 @@ const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
   topKDocs: 50,
   maxSystems: 5,
-  threshold: 0.75,
-  bm25Weight: 0.75,
+  threshold: 0.55,
+  vectorWeight: 0.65,
+  bm25Weight: 0.35,
   keywordBoost: 0.02,
   keywordBoostMax: 0.1,
 };
@@ -25,7 +26,7 @@ const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v2") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -33,7 +34,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v2", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -192,6 +193,7 @@ function fillSettingsForm() {
   document.querySelector("#topKInput").value = state.settings.topKDocs;
   document.querySelector("#maxSystemsInput").value = state.settings.maxSystems;
   document.querySelector("#thresholdInput").value = state.settings.threshold;
+  document.querySelector("#vectorWeightInput").value = state.settings.vectorWeight;
   document.querySelector("#bm25WeightInput").value = state.settings.bm25Weight;
   document.querySelector("#keywordBoostInput").value = state.settings.keywordBoost;
   document.querySelector("#keywordBoostMaxInput").value = state.settings.keywordBoostMax;
@@ -204,6 +206,7 @@ function readSettingsForm() {
     topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
     maxSystems: Number(document.querySelector("#maxSystemsInput").value || defaultSettings.maxSystems),
     threshold: Number(document.querySelector("#thresholdInput").value || defaultSettings.threshold),
+    vectorWeight: Number(document.querySelector("#vectorWeightInput").value || defaultSettings.vectorWeight),
     bm25Weight: Number(document.querySelector("#bm25WeightInput").value || defaultSettings.bm25Weight),
     keywordBoost: Number(document.querySelector("#keywordBoostInput").value || defaultSettings.keywordBoost),
     keywordBoostMax: Number(document.querySelector("#keywordBoostMaxInput").value || defaultSettings.keywordBoostMax),
@@ -217,7 +220,8 @@ function buildEnvPreview() {
     `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
     `DEFAULT_MAX_SYSTEMS=${state.settings.maxSystems}`,
     `SYSTEM_SELECTION_THRESHOLD=${state.settings.threshold}`,
-    `BM25_RANK_WEIGHT=${state.settings.bm25Weight}`,
+    `VECTOR_SCORE_WEIGHT=${state.settings.vectorWeight}`,
+    `BM25_SCORE_WEIGHT=${state.settings.bm25Weight}`,
     `KEYWORD_BOOST_PER_MATCH=${state.settings.keywordBoost}`,
     `KEYWORD_BOOST_MAX=${state.settings.keywordBoostMax}`,
   ].join("\n");
@@ -299,7 +303,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #bm25WeightInput, #keywordBoostInput, #keywordBoostMaxInput",
+    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #vectorWeightInput, #bm25WeightInput, #keywordBoostInput, #keywordBoostMaxInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

@@ -23,7 +23,7 @@ def hit(
 
 
 def test_system_aggregator_selection_thresholds() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.8)
+    aggregator = SystemAggregator(selection_threshold=0.5)
     decisions = aggregator.aggregate(
         [
             hit("strong", "memo_system", vector_score=0.82),
@@ -58,8 +58,26 @@ def test_system_aggregator_limits_evidence_sorts_and_applies_max_systems() -> No
     assert [doc.doc_id for doc in a_decision.evidence_docs] == ["a1", "a2", "a3"]
 
 
-def test_bm25_rank_needs_keyword_boost_to_cross_selection_threshold() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.8)
+def test_bm25_score_uses_query_level_normalization() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.3)
+
+    decisions = aggregator.aggregate(
+        [
+            hit("bm25_top", "memo_system", bm25_score=10.0, bm25_rank=1),
+            hit("bm25_half", "album_system", bm25_score=5.0, bm25_rank=2),
+        ],
+        max_systems=5,
+    )
+
+    by_system = {decision.system_id: decision for decision in decisions}
+    assert by_system["memo_system"].confidence == 0.35
+    assert by_system["memo_system"].selected is True
+    assert by_system["album_system"].confidence == 0.175
+    assert by_system["album_system"].selected is False
+
+
+def test_keyword_boost_can_cross_selection_threshold() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.4)
 
     without_keywords = aggregator.aggregate(
         [hit("bm25_only", "memo_system", bm25_score=1.0, bm25_rank=1)],
@@ -78,7 +96,7 @@ def test_bm25_rank_needs_keyword_boost_to_cross_selection_threshold() -> None:
         max_systems=5,
     )
 
-    assert without_keywords[0].confidence == 0.75
+    assert without_keywords[0].confidence == 0.35
     assert without_keywords[0].selected is False
-    assert with_keywords[0].confidence == 0.81
+    assert with_keywords[0].confidence == 0.41
     assert with_keywords[0].selected is True

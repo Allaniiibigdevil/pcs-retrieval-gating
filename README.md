@@ -84,8 +84,9 @@ EMBEDDING_DIM=512
 LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
 LOCAL_ARTIFACT_DIR=data/artifacts
 
-SYSTEM_SELECTION_THRESHOLD=0.75
-BM25_RANK_WEIGHT=0.75
+SYSTEM_SELECTION_THRESHOLD=0.55
+VECTOR_SCORE_WEIGHT=0.65
+BM25_SCORE_WEIGHT=0.35
 KEYWORD_BOOST_PER_MATCH=0.02
 KEYWORD_BOOST_MAX=0.10
 ```
@@ -107,24 +108,32 @@ BM25 检索：使用 normalized query
 
 ## 评分机制
 
-当前评分是 MVP 规则，不是训练出来的模型。单文档强度：
+当前评分是 MVP 规则，不是训练出来的模型。BM25 原始分会在当前 query 的候选集合内归一化：
 
 ```text
-doc_strength = max(vector_score, bm25_rank_score, vector_rank_score) + keyword_boost
+vector_score_norm = clamp(vector_score, 0, 1)
+bm25_score_norm = bm25_score / max_bm25_score_in_candidates
 ```
 
-其中：
+单文档强度：
 
 ```text
-bm25_rank_score = BM25_RANK_WEIGHT * max(0, 1 - (bm25_rank - 1) / 50)
 keyword_boost = min(KEYWORD_BOOST_MAX, KEYWORD_BOOST_PER_MATCH * matched_keyword_count)
+doc_strength = clamp(
+  VECTOR_SCORE_WEIGHT * vector_score_norm
+  + BM25_SCORE_WEIGHT * bm25_score_norm
+  + keyword_boost,
+  0,
+  1
+)
 ```
 
 说明：
 
-- `vector_score`：向量相似度，范围按 0 到 1 使用。
-- `bm25_rank_score`：只使用 BM25 排名位置转成的分数，不直接使用 BM25 原始分。
-- `BM25_RANK_WEIGHT`：降低 BM25 rank 1 的上限，避免词法命中直接等同于强语义命中。
+- `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
+- `bm25_score_norm`：当前 query 候选集合内的 BM25 归一化分，最高 BM25 文档为 1。
+- `VECTOR_SCORE_WEIGHT`：语义向量信号的权重。
+- `BM25_SCORE_WEIGHT`：BM25 词法命中信号的权重。
 - `keyword_boost`：命中文档关键词时的少量加分。
 - 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
 - `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。

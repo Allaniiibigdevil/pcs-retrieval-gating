@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     BM25_TOP_K: int = 50
     VECTOR_TOP_K: int = 50
 
-    SYSTEM_SELECTION_THRESHOLD: float = 0.75
-    BM25_RANK_WEIGHT: float = 0.75
+    SYSTEM_SELECTION_THRESHOLD: float = 0.55
+    VECTOR_SCORE_WEIGHT: float = 0.65
+    BM25_SCORE_WEIGHT: float = 0.35
     KEYWORD_BOOST_PER_MATCH: float = 0.02
     KEYWORD_BOOST_MAX: float = 0.10
 

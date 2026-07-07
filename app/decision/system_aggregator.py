@@ -9,26 +9,35 @@ def _clamp(value: float) -> float:
     return min(max(value, 0.0), 1.0)
 
 
-def simple_doc_strength(hit: SearchHit) -> float:
+def _vector_score_norm(hit: SearchHit) -> float:
+    if hit.vector_score is not None:
+        return _clamp(hit.vector_score)
+    if hit.vector_rank is not None:
+        return max(0.0, 1.0 - (hit.vector_rank - 1) / 50)
+    return 0.0
+
+
+def _bm25_score_norm(hit: SearchHit, max_bm25_score: float) -> float:
+    if hit.bm25_score is None or hit.bm25_score <= 0 or max_bm25_score <= 0:
+        return 0.0
+    return _clamp(hit.bm25_score / max_bm25_score)
+
+
+def simple_doc_strength(hit: SearchHit, max_bm25_score: float = 0.0) -> float:
     settings = get_settings()
-    scores: list[float] = []
-
-    if hit.vector_score is not None and 0.0 <= hit.vector_score <= 1.0:
-        scores.append(hit.vector_score)
-
-    if hit.bm25_rank is not None and (hit.bm25_score is None or hit.bm25_score > 0):
-        rank_score = max(0.0, 1.0 - (hit.bm25_rank - 1) / 50)
-        scores.append(settings.BM25_RANK_WEIGHT * rank_score)
-
-    if hit.vector_score is None and hit.vector_rank is not None:
-        scores.append(max(0.0, 1.0 - (hit.vector_rank - 1) / 50))
+    vector_score = _vector_score_norm(hit)
+    bm25_score = _bm25_score_norm(hit, max_bm25_score)
 
     matched_keywords = hit.metadata.get("matched_keywords", [])
     keyword_boost = min(
         settings.KEYWORD_BOOST_MAX,
         settings.KEYWORD_BOOST_PER_MATCH * len(matched_keywords),
     )
-    return _clamp(max(scores, default=0.0) + keyword_boost)
+    return _clamp(
+        settings.VECTOR_SCORE_WEIGHT * vector_score
+        + settings.BM25_SCORE_WEIGHT * bm25_score
+        + keyword_boost
+    )
 
 
 def build_reason(system_id: str, evidence_docs: list[SearchHit]) -> str:
@@ -60,11 +69,19 @@ class SystemAggregator:
         for doc in evidence_docs:
             grouped[doc.system_id].append(doc)
 
+        max_bm25_score = max(
+            (doc.bm25_score or 0.0 for doc in evidence_docs if (doc.bm25_score or 0.0) > 0),
+            default=0.0,
+        )
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():
-            sorted_docs = sorted(docs, key=simple_doc_strength, reverse=True)
+            sorted_docs = sorted(
+                docs,
+                key=lambda doc: simple_doc_strength(doc, max_bm25_score),
+                reverse=True,
+            )
             top_docs = sorted_docs[:3]
-            confidence = simple_doc_strength(top_docs[0]) if top_docs else 0.0
+            confidence = simple_doc_strength(top_docs[0], max_bm25_score) if top_docs else 0.0
             selected = confidence >= self.selection_threshold
 
             decisions.append(
