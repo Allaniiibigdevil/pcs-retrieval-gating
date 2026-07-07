@@ -23,7 +23,7 @@ def hit(
 
 
 def test_system_aggregator_selection_thresholds() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.5)
+    aggregator = SystemAggregator(selection_threshold=0.45)
     decisions = aggregator.aggregate(
         [
             hit("strong", "memo_system", vector_score=0.82),
@@ -34,7 +34,9 @@ def test_system_aggregator_selection_thresholds() -> None:
     )
 
     by_system = {decision.system_id: decision for decision in decisions}
+    assert by_system["memo_system"].confidence == 0.492
     assert by_system["memo_system"].selected is True
+    assert by_system["album_system"].confidence == 0.36
     assert by_system["album_system"].selected is False
     assert by_system["todo_system"].selected is False
 
@@ -76,27 +78,46 @@ def test_bm25_score_uses_query_level_normalization() -> None:
     assert by_system["album_system"].selected is False
 
 
-def test_keyword_boost_can_cross_selection_threshold() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.4)
+def test_agreement_boost_requires_semantic_and_lexical_signals() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.55)
 
-    without_keywords = aggregator.aggregate(
-        [hit("bm25_only", "memo_system", bm25_score=1.0, bm25_rank=1)],
+    semantic_only = aggregator.aggregate(
+        [hit("semantic_only", "memo_system", vector_score=0.4)],
         max_systems=5,
     )
-    with_keywords = aggregator.aggregate(
+    semantic_and_lexical = aggregator.aggregate(
         [
             hit(
-                "bm25_with_keywords",
+                "bm25_with_semantic",
                 "memo_system",
+                vector_score=0.4,
                 bm25_score=1.0,
                 bm25_rank=1,
-                matched_keywords=["shanghai", "trip", "meeting"],
             )
         ],
         max_systems=5,
     )
 
-    assert without_keywords[0].confidence == 0.35
-    assert without_keywords[0].selected is False
-    assert with_keywords[0].confidence == 0.41
-    assert with_keywords[0].selected is True
+    assert semantic_only[0].confidence == 0.24
+    assert semantic_only[0].selected is False
+    assert semantic_and_lexical[0].confidence == 0.64
+    assert semantic_and_lexical[0].selected is True
+
+
+def test_keyword_match_can_supply_lexical_signal_without_bm25() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.5)
+
+    decisions = aggregator.aggregate(
+        [
+            hit(
+                "vector_with_keywords",
+                "memo_system",
+                vector_score=0.4,
+                matched_keywords=["allergy", "seafood"],
+            )
+        ],
+        max_systems=5,
+    )
+
+    assert decisions[0].confidence == 0.43
+    assert decisions[0].selected is False

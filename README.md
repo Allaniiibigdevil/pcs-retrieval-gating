@@ -83,12 +83,17 @@ EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
 EMBEDDING_DIM=512
 LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
 LOCAL_ARTIFACT_DIR=data/artifacts
+LOCAL_SYNONYMS_PATH=examples/dicts/synonyms.txt
+LOCAL_STOPWORDS_PATH=examples/dicts/stopwords.txt
 
 SYSTEM_SELECTION_THRESHOLD=0.55
-VECTOR_SCORE_WEIGHT=0.65
+VECTOR_SCORE_WEIGHT=0.60
 BM25_SCORE_WEIGHT=0.35
-KEYWORD_BOOST_PER_MATCH=0.02
-KEYWORD_BOOST_MAX=0.10
+AGREEMENT_BOOST=0.05
+SEMANTIC_MATCH_THRESHOLD=0.35
+LEXICAL_MATCH_THRESHOLD=0.40
+KEYWORD_MATCH_PER_HIT=0.20
+KEYWORD_MATCH_MAX=0.60
 ```
 
 ## 查询处理
@@ -106,6 +111,12 @@ BM25 检索：使用 normalized query
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
+BM25 分词支持两类可选词表：
+- `LOCAL_SYNONYMS_PATH`：同义词表，支持 `海鲜,水产,虾蟹` 或 `海鲜 => 水产,虾蟹` 两种写法。
+- `LOCAL_STOPWORDS_PATH`：停用词表，每行一个词，只影响 BM25 分词，不影响 embedding。
+
+词表会同时影响离线 BM25 索引构建和在线 BM25 query 分词。修改词表后，建议重新运行离线建索引命令。
+
 ## 评分机制
 
 当前评分是 MVP 规则，不是训练出来的模型。BM25 原始分会在当前 query 的候选集合内归一化：
@@ -118,11 +129,16 @@ bm25_score_norm = bm25_score / max_bm25_score_in_candidates
 单文档强度：
 
 ```text
-keyword_boost = min(KEYWORD_BOOST_MAX, KEYWORD_BOOST_PER_MATCH * matched_keyword_count)
+keyword_match_score = min(KEYWORD_MATCH_MAX, KEYWORD_MATCH_PER_HIT * matched_keyword_count)
+lexical_score = max(bm25_score_norm, keyword_match_score)
+agreement_boost = AGREEMENT_BOOST if (
+  vector_score_norm >= SEMANTIC_MATCH_THRESHOLD
+  and lexical_score >= LEXICAL_MATCH_THRESHOLD
+) else 0
 doc_strength = clamp(
   VECTOR_SCORE_WEIGHT * vector_score_norm
-  + BM25_SCORE_WEIGHT * bm25_score_norm
-  + keyword_boost,
+  + BM25_SCORE_WEIGHT * lexical_score
+  + agreement_boost,
   0,
   1
 )
@@ -132,9 +148,11 @@ doc_strength = clamp(
 
 - `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
 - `bm25_score_norm`：当前 query 候选集合内的 BM25 归一化分，最高 BM25 文档为 1。
+- `keyword_match_score`：文档关键词命中的词面分，用于补足 BM25 对短关键词的敏感度。
+- `lexical_score`：词面信号，取 `bm25_score_norm` 和 `keyword_match_score` 的较大值。
+- `agreement_boost`：语义信号和词面信号同时达到阈值时的少量奖励。
 - `VECTOR_SCORE_WEIGHT`：语义向量信号的权重。
-- `BM25_SCORE_WEIGHT`：BM25 词法命中信号的权重。
-- `keyword_boost`：命中文档关键词时的少量加分。
+- `BM25_SCORE_WEIGHT`：词面信号的权重。
 - 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
 - `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
 

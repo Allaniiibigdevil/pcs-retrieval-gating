@@ -29,3 +29,29 @@ def test_build_bm25_text_weights_keywords() -> None:
     assert "memo_system" in text
     assert "\u7528\u6237\u8bb0\u5f55\u4e86\u4e0a\u6d77\u51fa\u5dee\u8ba1\u5212\u3002" in text
     assert text.count("\u4e0a\u6d77") >= 3
+
+
+def test_tokenize_applies_stopwords_and_synonyms(monkeypatch, tmp_path) -> None:
+    stopwords_path = tmp_path / "stopwords.txt"
+    stopwords_path.write_text("可以\n吗\n", encoding="utf-8")
+    synonyms_path = tmp_path / "synonyms.txt"
+    synonyms_path.write_text("海鲜,水产\n", encoding="utf-8")
+
+    from app.config import get_settings
+    from app.retrieval.lexicon import load_stopwords, load_synonyms
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "LOCAL_STOPWORDS_PATH", str(stopwords_path))
+    monkeypatch.setattr(settings, "LOCAL_SYNONYMS_PATH", str(synonyms_path))
+    load_stopwords.cache_clear()
+    load_synonyms.cache_clear()
+
+    tokens = tokenize("我可以吃海鲜吗")
+
+    assert "可以" not in tokens
+    assert "吗" not in tokens
+    assert "海鲜" in tokens
+    assert "水产" in tokens
+
+    load_stopwords.cache_clear()
+    load_synonyms.cache_clear()

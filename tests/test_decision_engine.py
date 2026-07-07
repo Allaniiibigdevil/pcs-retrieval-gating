@@ -29,7 +29,7 @@ async def test_decision_engine_returns_selected_systems() -> None:
                 )
             ]
         ),
-        aggregator=SystemAggregator(selection_threshold=0.5),
+        aggregator=SystemAggregator(selection_threshold=0.45),
     )
 
     response = await engine.decide("我可以吃海鲜吗？")

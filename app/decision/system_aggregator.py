@@ -23,20 +23,30 @@ def _bm25_score_norm(hit: SearchHit, max_bm25_score: float) -> float:
     return _clamp(hit.bm25_score / max_bm25_score)
 
 
+def _keyword_match_score(hit: SearchHit) -> float:
+    settings = get_settings()
+    matched_keywords = hit.metadata.get("matched_keywords", [])
+    return min(
+        settings.KEYWORD_MATCH_MAX,
+        settings.KEYWORD_MATCH_PER_HIT * len(matched_keywords),
+    )
+
+
 def simple_doc_strength(hit: SearchHit, max_bm25_score: float = 0.0) -> float:
     settings = get_settings()
-    vector_score = _vector_score_norm(hit)
-    bm25_score = _bm25_score_norm(hit, max_bm25_score)
-
-    matched_keywords = hit.metadata.get("matched_keywords", [])
-    keyword_boost = min(
-        settings.KEYWORD_BOOST_MAX,
-        settings.KEYWORD_BOOST_PER_MATCH * len(matched_keywords),
+    semantic_score = _vector_score_norm(hit)
+    lexical_score = max(_bm25_score_norm(hit, max_bm25_score), _keyword_match_score(hit))
+    agreement_boost = (
+        settings.AGREEMENT_BOOST
+        if semantic_score >= settings.SEMANTIC_MATCH_THRESHOLD
+        and lexical_score >= settings.LEXICAL_MATCH_THRESHOLD
+        else 0.0
     )
+
     return _clamp(
-        settings.VECTOR_SCORE_WEIGHT * vector_score
-        + settings.BM25_SCORE_WEIGHT * bm25_score
-        + keyword_boost
+        settings.VECTOR_SCORE_WEIGHT * semantic_score
+        + settings.BM25_SCORE_WEIGHT * lexical_score
+        + agreement_boost
     )
 
 

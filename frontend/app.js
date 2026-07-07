@@ -3,10 +3,13 @@ const defaultSettings = {
   topKDocs: 50,
   maxSystems: 5,
   threshold: 0.55,
-  vectorWeight: 0.65,
+  vectorWeight: 0.6,
   bm25Weight: 0.35,
-  keywordBoost: 0.02,
-  keywordBoostMax: 0.1,
+  agreementBoost: 0.05,
+  semanticThreshold: 0.35,
+  lexicalThreshold: 0.4,
+  keywordMatchPerHit: 0.2,
+  keywordMatchMax: 0.6,
 };
 
 const state = {
@@ -26,7 +29,7 @@ const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v2") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v3") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -34,7 +37,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v2", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v3", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -195,8 +198,11 @@ function fillSettingsForm() {
   document.querySelector("#thresholdInput").value = state.settings.threshold;
   document.querySelector("#vectorWeightInput").value = state.settings.vectorWeight;
   document.querySelector("#bm25WeightInput").value = state.settings.bm25Weight;
-  document.querySelector("#keywordBoostInput").value = state.settings.keywordBoost;
-  document.querySelector("#keywordBoostMaxInput").value = state.settings.keywordBoostMax;
+  document.querySelector("#agreementBoostInput").value = state.settings.agreementBoost;
+  document.querySelector("#semanticThresholdInput").value = state.settings.semanticThreshold;
+  document.querySelector("#lexicalThresholdInput").value = state.settings.lexicalThreshold;
+  document.querySelector("#keywordMatchPerHitInput").value = state.settings.keywordMatchPerHit;
+  document.querySelector("#keywordMatchMaxInput").value = state.settings.keywordMatchMax;
   renderEnvPreview();
 }
 
@@ -208,8 +214,15 @@ function readSettingsForm() {
     threshold: Number(document.querySelector("#thresholdInput").value || defaultSettings.threshold),
     vectorWeight: Number(document.querySelector("#vectorWeightInput").value || defaultSettings.vectorWeight),
     bm25Weight: Number(document.querySelector("#bm25WeightInput").value || defaultSettings.bm25Weight),
-    keywordBoost: Number(document.querySelector("#keywordBoostInput").value || defaultSettings.keywordBoost),
-    keywordBoostMax: Number(document.querySelector("#keywordBoostMaxInput").value || defaultSettings.keywordBoostMax),
+    agreementBoost: Number(document.querySelector("#agreementBoostInput").value || defaultSettings.agreementBoost),
+    semanticThreshold: Number(
+      document.querySelector("#semanticThresholdInput").value || defaultSettings.semanticThreshold,
+    ),
+    lexicalThreshold: Number(document.querySelector("#lexicalThresholdInput").value || defaultSettings.lexicalThreshold),
+    keywordMatchPerHit: Number(
+      document.querySelector("#keywordMatchPerHitInput").value || defaultSettings.keywordMatchPerHit,
+    ),
+    keywordMatchMax: Number(document.querySelector("#keywordMatchMaxInput").value || defaultSettings.keywordMatchMax),
   };
   saveSettingsDraft();
   renderEnvPreview();
@@ -222,8 +235,11 @@ function buildEnvPreview() {
     `SYSTEM_SELECTION_THRESHOLD=${state.settings.threshold}`,
     `VECTOR_SCORE_WEIGHT=${state.settings.vectorWeight}`,
     `BM25_SCORE_WEIGHT=${state.settings.bm25Weight}`,
-    `KEYWORD_BOOST_PER_MATCH=${state.settings.keywordBoost}`,
-    `KEYWORD_BOOST_MAX=${state.settings.keywordBoostMax}`,
+    `AGREEMENT_BOOST=${state.settings.agreementBoost}`,
+    `SEMANTIC_MATCH_THRESHOLD=${state.settings.semanticThreshold}`,
+    `LEXICAL_MATCH_THRESHOLD=${state.settings.lexicalThreshold}`,
+    `KEYWORD_MATCH_PER_HIT=${state.settings.keywordMatchPerHit}`,
+    `KEYWORD_MATCH_MAX=${state.settings.keywordMatchMax}`,
   ].join("\n");
 }
 
@@ -303,7 +319,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #vectorWeightInput, #bm25WeightInput, #keywordBoostInput, #keywordBoostMaxInput",
+    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #vectorWeightInput, #bm25WeightInput, #agreementBoostInput, #semanticThresholdInput, #lexicalThresholdInput, #keywordMatchPerHitInput, #keywordMatchMaxInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

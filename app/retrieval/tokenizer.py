@@ -1,6 +1,7 @@
 import re
 import warnings
 
+from app.retrieval.lexicon import load_stopwords, load_synonyms
 from app.schemas.doc import SourceDoc
 
 
@@ -17,17 +18,29 @@ def tokenize(text: str) -> list[str]:
     normalized = text.strip().lower()
     tokens: list[str] = []
     seen: set[str] = set()
+    stopwords = load_stopwords()
+    synonyms = load_synonyms()
     for token in jieba.lcut(normalized, cut_all=False):
         token = token.strip()
         if not token:
             continue
         if re.fullmatch(r"\W+", token):
             continue
+        if token in stopwords:
+            continue
         _append_token(tokens, seen, token)
+        for synonym in synonyms.get(token, []):
+            if synonym not in stopwords:
+                _append_token(tokens, seen, synonym)
 
     for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
         for token in _char_ngrams(run):
+            if token in stopwords:
+                continue
             _append_token(tokens, seen, token)
+            for synonym in synonyms.get(token, []):
+                if synonym not in stopwords:
+                    _append_token(tokens, seen, synonym)
     return tokens
 
 
