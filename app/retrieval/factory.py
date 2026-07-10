@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Protocol
 
-from app.retrieval.local_bm25_retriever import LocalBM25Retriever
+from app.retrieval.local_es_retriever import LocalElasticsearchRetriever
 from app.retrieval.local_faiss_retriever import LocalFaissRetriever
 from app.schemas.search import SearchHit
 
@@ -13,7 +13,7 @@ class Retriever(Protocol):
 
 @lru_cache
 def get_keyword_retriever() -> Retriever:
-    return LocalBM25Retriever()
+    return LocalElasticsearchRetriever()
 
 
 @lru_cache

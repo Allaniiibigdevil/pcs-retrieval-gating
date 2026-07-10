@@ -61,6 +61,6 @@ def _char_ngrams(text: str) -> list[str]:
     return grams
 
 
-def build_bm25_text(doc: SourceDoc) -> str:
+def build_keyword_text(doc: SourceDoc) -> str:
     weighted_keywords = " ".join(doc.keywords * 3)
     return f"{doc.system_id} {doc.summary} {weighted_keywords}"
