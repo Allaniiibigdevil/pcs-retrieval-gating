@@ -1,4 +1,4 @@
-from app.retrieval.tokenizer import build_bm25_text, tokenize
+from app.retrieval.tokenizer import build_keyword_text, tokenize
 from app.schemas.doc import SourceDoc
 
 
@@ -16,7 +16,7 @@ def test_tokenize_adds_chinese_ngram_fallback() -> None:
     assert "\u6d77\u9c9c" in tokens
 
 
-def test_build_bm25_text_weights_keywords() -> None:
+def test_build_keyword_text_weights_keywords() -> None:
     doc = SourceDoc(
         doc_id="memo_doc_001",
         system_id="memo_system",
@@ -24,7 +24,7 @@ def test_build_bm25_text_weights_keywords() -> None:
         keywords=["\u4e0a\u6d77", "\u4f1a\u8bae"],
     )
 
-    text = build_bm25_text(doc)
+    text = build_keyword_text(doc)
 
     assert "memo_system" in text
     assert "\u7528\u6237\u8bb0\u5f55\u4e86\u4e0a\u6d77\u51fa\u5dee\u8ba1\u5212\u3002" in text

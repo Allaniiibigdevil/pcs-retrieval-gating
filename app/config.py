@@ -24,13 +24,24 @@ class Settings(BaseSettings):
     LOCAL_SYNONYMS_PATH: str = "examples/dicts/synonyms.txt"
     LOCAL_STOPWORDS_PATH: str = "examples/dicts/stopwords.txt"
 
+    LOCAL_ES_URL: str = "http://127.0.0.1:9200"
+    LOCAL_ES_INDEX: str = "pcs_retrieval_docs"
+    LOCAL_ES_ANALYZER: str = "standard"
+    LOCAL_ES_SEARCH_ANALYZER: str = "standard"
+    LOCAL_ES_SHARDS: int = 1
+    LOCAL_ES_REPLICAS: int = 0
+    LOCAL_ES_TIMEOUT_SECONDS: int = 10
+    LOCAL_ES_INDEX_ON_BUILD: bool = False
+    LOCAL_ES_SUMMARY_BOOST: float = 1.0
+    LOCAL_ES_KEYWORDS_BOOST: float = 3.0
+    LOCAL_ES_SEARCH_TEXT_BOOST: float = 1.5
+
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = 512
 
     DEFAULT_TOP_K_DOCS: int = 50
     DEFAULT_MAX_SYSTEMS: int = 5
-    BM25_TOP_K: int = 50
     VECTOR_TOP_K: int = 50
 
     SYSTEM_SELECTION_THRESHOLD: float = 0.55

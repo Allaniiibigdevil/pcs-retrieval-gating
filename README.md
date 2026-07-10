@@ -4,12 +4,12 @@
 
 ```text
 用户任务
-  -> BM25 / FAISS 找到相关文档证据
+  -> ES / FAISS 找到相关文档证据
   -> 聚合到 system_id
   -> 输出 selected_systems
 ```
 
-当前分支只维护本地模式，不实现 Elasticsearch 和 GaussDB 路径。
+当前分支只维护本地模式：使用本地 Elasticsearch 做词法检索，使用本地 FAISS 做向量检索，不实现远端 Elasticsearch 和 GaussDB 路径。
 
 ## 当前实现
 
@@ -17,10 +17,10 @@
 
 ```text
 离线灌入 SourceDoc
-  -> 使用 jieba + 字符 n-gram 构建本地 BM25 索引
+  -> 构建本地 Elasticsearch 词法索引
   -> 使用 BGE 生成文档向量
   -> 构建本地 FAISS 索引
-  -> 在线 FastAPI 加载本地 artifacts
+  -> 在线 FastAPI 查询本地 ES 并加载本地 FAISS artifacts
   -> /v1/decide 输出需要检索的子系统列表
 ```
 
@@ -28,7 +28,7 @@
 
 - 不提供实时文档写入接口。
 - 文档通过离线命令灌入和建索引。
-- BM25 使用本地 artifact。
+- 词法检索使用本地 Elasticsearch。
 - 向量检索使用本地 FAISS artifact。
 - embedding 默认使用 `BAAI/bge-small-zh-v1.5`。
 - `/v1/decide` 的核心输出是 `selected_systems`。
@@ -41,14 +41,14 @@ app/
   decision/       query 处理、证据增强、系统聚合、决策引擎
   embedding/      mock embedding 和 BGE embedding
   offline/        本地离线灌入和索引构建命令
-  retrieval/      本地 BM25、本地 FAISS、候选合并、retriever factory
+  retrieval/      本地 ES、本地 FAISS、候选合并、retriever factory
   schemas/        Pydantic 请求 / 响应模型
   storage/        本地 JSONL 文档存储和 artifact 存储
   utils/          日志、计时等工具
 
 data/
   raw/            本地原始文档，git 忽略
-  artifacts/      生成的 BM25 / FAISS artifacts，git 忽略
+  artifacts/      生成的 FAISS artifacts，git 忽略
 
 examples/         示例 SourceDoc 输入
 tests/            单元测试
@@ -83,6 +83,11 @@ EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
 EMBEDDING_DIM=512
 LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
 LOCAL_ARTIFACT_DIR=data/artifacts
+LOCAL_ES_URL=http://127.0.0.1:9200
+LOCAL_ES_INDEX=pcs_retrieval_docs
+LOCAL_ES_ANALYZER=standard
+LOCAL_ES_SEARCH_ANALYZER=standard
+LOCAL_ES_INDEX_ON_BUILD=false
 LOCAL_SYNONYMS_PATH=examples/dicts/synonyms.txt
 LOCAL_STOPWORDS_PATH=examples/dicts/stopwords.txt
 
@@ -98,28 +103,30 @@ KEYWORD_MATCH_MAX=0.60
 
 ## 查询处理
 
-BM25 和向量检索使用不同的 query：
+ES 词法检索和向量检索使用不同的 query：
 
 ```text
-BM25 检索：使用 normalized query
+ES 词法检索：使用 normalized query
 向量检索：使用原始 query
 ```
 
 原因：
 
-- BM25 是词法检索，适合做基础归一化和分词。
+- ES 是词法检索，适合做基础归一化，并在 ES analyzer 中承接分词、同义词、停用词和领域词配置。
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
-BM25 分词支持两类可选词表：
-- `LOCAL_SYNONYMS_PATH`：同义词表，支持 `海鲜,水产,虾蟹` 或 `海鲜 => 水产,虾蟹` 两种写法。
-- `LOCAL_STOPWORDS_PATH`：停用词表，每行一个词，只影响 BM25 分词，不影响 embedding。
+本地 Python tokenizer 仍用于 query 归一化和证据关键词匹配。线上词法检索由本地 ES 提供。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK 或自定义同义词 / 停用词 / 领域词 analyzer，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
 
-词表会同时影响离线 BM25 索引构建和在线 BM25 query 分词。修改词表后，建议重新运行离线建索引命令。
+本地证据关键词匹配支持两类可选词表：
+- `LOCAL_SYNONYMS_PATH`：同义词表，支持 `海鲜,水产,虾蟹` 或 `海鲜 => 水产,虾蟹` 两种写法。
+- `LOCAL_STOPWORDS_PATH`：停用词表，每行一个词，只影响本地 tokenizer，不影响 embedding。
+
+词表会影响在线证据关键词匹配以及 query 归一化相关逻辑。修改 ES analyzer 词表后，建议用 `--index-es` 重新构建 ES 索引。
 
 ## 评分机制
 
-当前评分是 MVP 规则，不是训练出来的模型。BM25 原始分会在当前 query 的候选集合内归一化：
+当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，并在当前 query 的候选集合内归一化：
 
 ```text
 vector_score_norm = clamp(vector_score, 0, 1)
@@ -147,8 +154,8 @@ doc_strength = clamp(
 说明：
 
 - `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
-- `bm25_score_norm`：当前 query 候选集合内的 BM25 归一化分，最高 BM25 文档为 1。
-- `keyword_match_score`：文档关键词命中的词面分，用于补足 BM25 对短关键词的敏感度。
+- `bm25_score_norm`：当前 query 候选集合内的 ES 词法分归一化结果，最高词法分文档为 1。
+- `keyword_match_score`：文档关键词命中的词面分，用于补足词法检索对短关键词的敏感度。
 - `lexical_score`：词面信号，取 `bm25_score_norm` 和 `keyword_match_score` 的较大值。
 - `agreement_boost`：语义信号和词面信号同时达到阈值时的少量奖励。
 - `VECTOR_SCORE_WEIGHT`：语义向量信号的权重。
@@ -158,10 +165,16 @@ doc_strength = clamp(
 
 ## 离线灌入和建索引
 
-直接使用示例文档构建本地索引：
+直接使用示例文档构建本地 FAISS artifacts：
 
 ```bash
 uv run python -m app.offline.build_index --docs examples/docs.jsonl
+```
+
+如果本地 ES 已启动，并希望同步重建 ES 词法索引：
+
+```bash
+uv run python -m app.offline.build_index --docs examples/docs.jsonl --index-es
 ```
 
 也可以先灌入到本地 raw store，再构建索引：
@@ -175,7 +188,6 @@ uv run python -m app.offline.build_index
 
 ```text
 data/artifacts/docs.jsonl
-data/artifacts/bm25.pkl
 data/artifacts/faiss.index
 data/artifacts/faiss_doc_ids.json
 data/artifacts/manifest.json
@@ -207,7 +219,7 @@ http://127.0.0.1:8000/frontend/
 
 ## 调试检索接口
 
-BM25 检索：
+ES 词法检索：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/search/bm25 ^
@@ -221,7 +233,7 @@ curl -X POST http://127.0.0.1:8000/v1/search/bm25 ^
 /v1/search/es
 ```
 
-在 `local` 模式下，`/v1/search/es` 是 BM25 检索的 alias。
+在 `local` 模式下，`/v1/search/bm25` 和 `/v1/search/es` 都会走本地 ES 词法检索。
 
 向量检索：
 
@@ -300,10 +312,10 @@ uv run python -m compileall app tests
 
 ## MVP 说明
 
-- 本地模式不使用 ES / GaussDB。
+- 本地模式使用本地 ES，不使用 GaussDB。
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
-- BM25 使用 jieba 分词，并补充中文字符 n-gram。
+- 词法检索使用本地 ES analyzer；本地 tokenizer 仅用于 query 归一化和证据关键词匹配。
 - 向量检索使用原始 query，不做停用词删除。
 - 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
 - 最终输出目标是子系统选择，不是文档排序。

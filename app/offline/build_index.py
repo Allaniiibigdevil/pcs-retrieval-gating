@@ -7,9 +7,14 @@ from app.storage.local_doc_store import LocalDocStore, load_docs_from_json_or_js
 
 
 async def run() -> None:
-    parser = argparse.ArgumentParser(description="Build local BM25 and FAISS artifacts.")
+    parser = argparse.ArgumentParser(description="Build local keyword and FAISS artifacts.")
     parser.add_argument("--docs", default=None, help="SourceDoc JSON/JSONL path. Defaults to raw store.")
     parser.add_argument("--artifact-dir", default=None, help="Output artifact directory.")
+    parser.add_argument(
+        "--index-es",
+        action="store_true",
+        help="Rebuild the configured local Elasticsearch keyword index from the same docs.",
+    )
     args = parser.parse_args()
 
     if args.docs:
@@ -17,7 +22,10 @@ async def run() -> None:
     else:
         docs = LocalDocStore().load_all()
 
-    builder = LocalIndexBuilder(artifact_store=LocalArtifactStore(args.artifact_dir))
+    builder = LocalIndexBuilder(
+        artifact_store=LocalArtifactStore(args.artifact_dir),
+        index_elasticsearch=args.index_es,
+    )
     result = await builder.build(docs)
     print(
         "built_local_index "

@@ -4,7 +4,6 @@ import pytest
 
 from app.embedding.embedding_service import MockEmbeddingService
 from app.offline.local_index_builder import LocalIndexBuilder
-from app.retrieval.local_bm25_retriever import LocalBM25Retriever
 from app.retrieval.local_faiss_retriever import LocalFaissRetriever
 from app.schemas.doc import SourceDoc
 from app.storage.local_artifact_store import LocalArtifactStore
@@ -37,15 +36,9 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     assert result.doc_count == 2
     assert result.embedding_dim == 16
     assert artifact_store.docs_path.exists()
-    assert artifact_store.bm25_path.exists()
     assert artifact_store.faiss_path.exists()
     assert artifact_store.faiss_doc_ids_path.exists()
     assert artifact_store.manifest_path.exists()
-
-    bm25_hits = await LocalBM25Retriever(artifact_store).search("shanghai trip meeting", top_k=5)
-    assert bm25_hits
-    assert {hit.doc_id for hit in bm25_hits} == {"memo_doc_001", "album_doc_001"}
-    assert all(hit.bm25_score is not None for hit in bm25_hits)
 
     vector_hits = await LocalFaissRetriever(artifact_store, embedding_service).search(
         "shanghai trip meeting",

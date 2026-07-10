@@ -1,6 +1,5 @@
 import json
 import logging
-import pickle
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +12,6 @@ class LocalArtifactStore:
         settings = get_settings()
         self.artifact_dir = Path(artifact_dir or settings.LOCAL_ARTIFACT_DIR)
         self.docs_path = self.artifact_dir / "docs.jsonl"
-        self.bm25_path = self.artifact_dir / "bm25.pkl"
         self.faiss_path = self.artifact_dir / "faiss.index"
         self.faiss_doc_ids_path = self.artifact_dir / "faiss_doc_ids.json"
         self.manifest_path = self.artifact_dir / "manifest.json"
@@ -42,19 +40,6 @@ class LocalArtifactStore:
                 except Exception as exc:
                     raise ValueError(f"Invalid docs artifact at {self.docs_path}:{line_no}") from exc
         return docs
-
-    def save_bm25(self, bm25_index: Any, tokenized_docs: list[list[str]]) -> None:
-        self.ensure_dir()
-        with self.bm25_path.open("wb") as file:
-            pickle.dump({"index": bm25_index, "tokenized_docs": tokenized_docs}, file)
-
-    def load_bm25(self) -> tuple[Any, list[list[str]]]:
-        if not self.bm25_path.exists():
-            raise FileNotFoundError(f"Missing BM25 artifact: {self.bm25_path}")
-
-        with self.bm25_path.open("rb") as file:
-            payload = pickle.load(file)
-        return payload["index"], payload["tokenized_docs"]
 
     def save_faiss(self, index: Any, doc_ids: list[str]) -> None:
         self.ensure_dir()

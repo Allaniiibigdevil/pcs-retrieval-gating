@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 import logging
 
 import numpy as np
-from rank_bm25 import BM25Okapi
 
 from app.config import get_settings
 from app.embedding.embedding_service import (
@@ -11,7 +10,7 @@ from app.embedding.embedding_service import (
     build_embedding_text,
     get_embedding_service,
 )
-from app.retrieval.tokenizer import build_bm25_text, tokenize
+from app.offline.local_es_indexer import LocalElasticsearchIndexer
 from app.schemas.doc import SourceDoc
 from app.storage.local_artifact_store import LocalArtifactStore
 
@@ -29,17 +28,20 @@ class LocalIndexBuilder:
         self,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
+        index_elasticsearch: bool | None = None,
     ) -> None:
         self.settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service or get_embedding_service()
+        self.index_elasticsearch = (
+            self.settings.LOCAL_ES_INDEX_ON_BUILD
+            if index_elasticsearch is None
+            else index_elasticsearch
+        )
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
         if not docs:
             raise ValueError("Cannot build local index from an empty document set")
-
-        tokenized_docs = [tokenize(build_bm25_text(doc)) for doc in docs]
-        bm25 = BM25Okapi(tokenized_docs)
 
         embedding_texts = [build_embedding_text(doc) for doc in docs]
         embeddings = await self.embedding_service.embed_batch(embedding_texts)
@@ -55,13 +57,18 @@ class LocalIndexBuilder:
 
         doc_ids = [doc.doc_id for doc in docs]
         self.artifact_store.save_docs(docs)
-        self.artifact_store.save_bm25(bm25, tokenized_docs)
         self.artifact_store.save_faiss(index, doc_ids)
+        if self.index_elasticsearch:
+            LocalElasticsearchIndexer().rebuild(docs)
         self.artifact_store.save_manifest(
             {
                 "version": 1,
                 "built_at": datetime.now(UTC).isoformat(),
                 "doc_count": len(docs),
+                "keyword_retriever": "local_es",
+                "elasticsearch_indexed": self.index_elasticsearch,
+                "elasticsearch_url": self.settings.LOCAL_ES_URL,
+                "elasticsearch_index": self.settings.LOCAL_ES_INDEX,
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": int(embedding_matrix.shape[1]),
