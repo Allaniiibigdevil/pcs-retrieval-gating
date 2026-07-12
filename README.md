@@ -91,14 +91,11 @@ LOCAL_ES_INDEX_ON_BUILD=false
 LOCAL_SYNONYMS_PATH=examples/dicts/synonyms.txt
 LOCAL_STOPWORDS_PATH=examples/dicts/stopwords.txt
 
-SYSTEM_SELECTION_THRESHOLD=0.55
-VECTOR_SCORE_WEIGHT=0.60
-BM25_SCORE_WEIGHT=0.35
-AGREEMENT_BOOST=0.05
-SEMANTIC_MATCH_THRESHOLD=0.35
-LEXICAL_MATCH_THRESHOLD=0.40
-KEYWORD_MATCH_PER_HIT=0.20
-KEYWORD_MATCH_MAX=0.60
+SYSTEM_SELECTION_THRESHOLD=0.60
+ES_SCORE_WEIGHT=0.55
+AGREEMENT_WEIGHT=0.20
+SEMANTIC_MATCH_THRESHOLD=0.30
+LEXICAL_MATCH_THRESHOLD=0.30
 ```
 
 ## 查询处理
@@ -126,26 +123,23 @@ ES 词法检索：使用 normalized query
 
 ## 评分机制
 
-当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，并在当前 query 的候选集合内归一化：
+当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，只在当前 query 的候选集合内归一化：
 
 ```text
 vector_score_norm = clamp(vector_score, 0, 1)
-bm25_score_norm = bm25_score / max_bm25_score_in_candidates
+es_score_norm = es_score / max_es_score_in_candidates
 ```
 
 单文档强度：
 
 ```text
-keyword_match_score = min(KEYWORD_MATCH_MAX, KEYWORD_MATCH_PER_HIT * matched_keyword_count)
-lexical_score = max(bm25_score_norm, keyword_match_score)
-agreement_boost = AGREEMENT_BOOST if (
+base_score = max(vector_score_norm, ES_SCORE_WEIGHT * es_score_norm)
+agreement_score = AGREEMENT_WEIGHT * sqrt(vector_score_norm * es_score_norm) if (
   vector_score_norm >= SEMANTIC_MATCH_THRESHOLD
-  and lexical_score >= LEXICAL_MATCH_THRESHOLD
+  and es_score_norm >= LEXICAL_MATCH_THRESHOLD
 ) else 0
 doc_strength = clamp(
-  VECTOR_SCORE_WEIGHT * vector_score_norm
-  + BM25_SCORE_WEIGHT * lexical_score
-  + agreement_boost,
+  base_score + agreement_score,
   0,
   1
 )
@@ -154,12 +148,11 @@ doc_strength = clamp(
 说明：
 
 - `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
-- `bm25_score_norm`：当前 query 候选集合内的 ES 词法分归一化结果，最高词法分文档为 1。
-- `keyword_match_score`：文档关键词命中的词面分，用于补足词法检索对短关键词的敏感度。
-- `lexical_score`：词面信号，取 `bm25_score_norm` 和 `keyword_match_score` 的较大值。
-- `agreement_boost`：语义信号和词面信号同时达到阈值时的少量奖励。
-- `VECTOR_SCORE_WEIGHT`：语义向量信号的权重。
-- `BM25_SCORE_WEIGHT`：词面信号的权重。
+- `es_score_norm`：ES 分在当前 query 候选集内的相对强度，最高分为 1，不用于跨 query 比较。
+- `base_score`：取向量分和加权 ES 分的较大值，任意一路强命中都能作为基础证据。
+- `ES_SCORE_WEIGHT`：限制 ES 单路第一名的最高基础贡献，避免其因归一化为 1 而自动入选。
+- `agreement_score`：同一文档被两路命中且均达到最低门槛时，按两路分数几何平均给予连续奖励。
+- `AGREEMENT_WEIGHT`：一致性奖励的系数。
 - 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
 - `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
 

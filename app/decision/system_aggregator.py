@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 
 from app.config import get_settings
@@ -17,36 +18,26 @@ def _vector_score_norm(hit: SearchHit) -> float:
     return 0.0
 
 
-def _bm25_score_norm(hit: SearchHit, max_bm25_score: float) -> float:
-    if hit.bm25_score is None or hit.bm25_score <= 0 or max_bm25_score <= 0:
+def _es_score_norm(hit: SearchHit, max_es_score: float) -> float:
+    """Normalize ES scores within one query's candidate set."""
+    if hit.bm25_score is None or hit.bm25_score <= 0 or max_es_score <= 0:
         return 0.0
-    return _clamp(hit.bm25_score / max_bm25_score)
+    return _clamp(hit.bm25_score / max_es_score)
 
 
-def _keyword_match_score(hit: SearchHit) -> float:
-    settings = get_settings()
-    matched_keywords = hit.metadata.get("matched_keywords", [])
-    return min(
-        settings.KEYWORD_MATCH_MAX,
-        settings.KEYWORD_MATCH_PER_HIT * len(matched_keywords),
-    )
-
-
-def simple_doc_strength(hit: SearchHit, max_bm25_score: float = 0.0) -> float:
+def simple_doc_strength(hit: SearchHit, max_es_score: float = 0.0) -> float:
     settings = get_settings()
     semantic_score = _vector_score_norm(hit)
-    lexical_score = max(_bm25_score_norm(hit, max_bm25_score), _keyword_match_score(hit))
+    lexical_score = _es_score_norm(hit, max_es_score)
     agreement_boost = (
-        settings.AGREEMENT_BOOST
+        settings.AGREEMENT_WEIGHT * math.sqrt(semantic_score * lexical_score)
         if semantic_score >= settings.SEMANTIC_MATCH_THRESHOLD
         and lexical_score >= settings.LEXICAL_MATCH_THRESHOLD
         else 0.0
     )
 
     return _clamp(
-        settings.VECTOR_SCORE_WEIGHT * semantic_score
-        + settings.BM25_SCORE_WEIGHT * lexical_score
-        + agreement_boost
+        max(semantic_score, settings.ES_SCORE_WEIGHT * lexical_score) + agreement_boost
     )
 
 
@@ -79,19 +70,19 @@ class SystemAggregator:
         for doc in evidence_docs:
             grouped[doc.system_id].append(doc)
 
-        max_bm25_score = max(
-            (doc.bm25_score or 0.0 for doc in evidence_docs if (doc.bm25_score or 0.0) > 0),
+        max_es_score = max(
+            (doc.bm25_score or 0.0 for doc in evidence_docs),
             default=0.0,
         )
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():
             sorted_docs = sorted(
                 docs,
-                key=lambda doc: simple_doc_strength(doc, max_bm25_score),
+                key=lambda doc: simple_doc_strength(doc, max_es_score),
                 reverse=True,
             )
             top_docs = sorted_docs[:3]
-            confidence = simple_doc_strength(top_docs[0], max_bm25_score) if top_docs else 0.0
+            confidence = simple_doc_strength(top_docs[0], max_es_score) if top_docs else 0.0
             selected = confidence >= self.selection_threshold
 
             decisions.append(

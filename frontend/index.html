@@ -146,42 +146,27 @@
               <div class="field-row">
                 <label for="thresholdInput">SYSTEM_SELECTION_THRESHOLD</label>
                 <input id="thresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.55。系统 confidence 大于等于这个阈值时，进入最终的 selected_systems。</p>
+                <p>默认值：0.60。系统 confidence 大于等于这个阈值时，进入最终的 selected_systems。</p>
               </div>
               <div class="field-row">
-                <label for="vectorWeightInput">VECTOR_SCORE_WEIGHT</label>
-                <input id="vectorWeightInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.60。向量相似度在 doc_strength 中的权重，表示语义相关性的贡献。</p>
+                <label for="esWeightInput">ES_SCORE_WEIGHT</label>
+                <input id="esWeightInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.55。限制 ES 单路归一化第一名的最高基础贡献。</p>
               </div>
               <div class="field-row">
-                <label for="bm25WeightInput">BM25_SCORE_WEIGHT</label>
-                <input id="bm25WeightInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.35。词面信号在 doc_strength 中的权重，词面信号取 BM25 归一化分和关键词命中分中的较大值。</p>
-              </div>
-              <div class="field-row">
-                <label for="agreementBoostInput">AGREEMENT_BOOST</label>
-                <input id="agreementBoostInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.05。语义信号和词面信号同时过线时追加的一致性奖励。</p>
+                <label for="agreementWeightInput">AGREEMENT_WEIGHT</label>
+                <input id="agreementWeightInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.20。双路过线时，几何平均一致性奖励的系数。</p>
               </div>
               <div class="field-row">
                 <label for="semanticThresholdInput">SEMANTIC_MATCH_THRESHOLD</label>
                 <input id="semanticThresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.35。触发一致性奖励所需的最低语义分。</p>
+                <p>默认值：0.30。触发一致性奖励所需的最低语义分。</p>
               </div>
               <div class="field-row">
                 <label for="lexicalThresholdInput">LEXICAL_MATCH_THRESHOLD</label>
                 <input id="lexicalThresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.40。触发一致性奖励所需的最低词面分。</p>
-              </div>
-              <div class="field-row">
-                <label for="keywordMatchPerHitInput">KEYWORD_MATCH_PER_HIT</label>
-                <input id="keywordMatchPerHitInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.20。每命中一个文档关键词时产生的词面分。</p>
-              </div>
-              <div class="field-row">
-                <label for="keywordMatchMaxInput">KEYWORD_MATCH_MAX</label>
-                <input id="keywordMatchMaxInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.60。关键词命中分的上限，避免关键词数量过多导致误选。</p>
+                <p>默认值：0.30。触发一致性奖励所需的最低 ES query 内归一化分。</p>
               </div>
             </section>
 
@@ -197,17 +182,16 @@
                   <code>bm25_score_norm = bm25_score / max_bm25_score_in_candidates</code>
                 </div>
                 <div>
-                  <strong>2. 词面信号</strong>
-                  <code>keyword_match_score = min(KEYWORD_MATCH_MAX, KEYWORD_MATCH_PER_HIT * matched_keyword_count)</code>
-                  <code>lexical_score = max(bm25_score_norm, keyword_match_score)</code>
+                  <strong>2. 基础分</strong>
+                  <code>base = max(vector_score_norm, ES_SCORE_WEIGHT * es_score_norm)</code>
                 </div>
                 <div>
                   <strong>3. 一致性奖励</strong>
-                  <code>agreement_boost = AGREEMENT_BOOST if vector_score_norm >= SEMANTIC_MATCH_THRESHOLD and lexical_score >= LEXICAL_MATCH_THRESHOLD else 0</code>
+                  <code>agreement = AGREEMENT_WEIGHT * sqrt(vector_score_norm * es_score_norm)，仅在双路均达到最低门槛时生效</code>
                 </div>
                 <div>
                   <strong>4. 单文档强度</strong>
-                  <code>doc_strength = clamp(VECTOR_SCORE_WEIGHT * vector_score_norm + BM25_SCORE_WEIGHT * lexical_score + agreement_boost, 0, 1)</code>
+                  <code>doc_strength = clamp(base + agreement, 0, 1)</code>
                 </div>
                 <div>
                   <strong>5. 系统选择</strong>

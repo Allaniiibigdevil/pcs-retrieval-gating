@@ -44,14 +44,11 @@ class Settings(BaseSettings):
     DEFAULT_MAX_SYSTEMS: int = 5
     VECTOR_TOP_K: int = 50
 
-    SYSTEM_SELECTION_THRESHOLD: float = 0.55
-    VECTOR_SCORE_WEIGHT: float = 0.60
-    BM25_SCORE_WEIGHT: float = 0.35
-    AGREEMENT_BOOST: float = 0.05
-    SEMANTIC_MATCH_THRESHOLD: float = 0.35
-    LEXICAL_MATCH_THRESHOLD: float = 0.40
-    KEYWORD_MATCH_PER_HIT: float = 0.20
-    KEYWORD_MATCH_MAX: float = 0.60
+    SYSTEM_SELECTION_THRESHOLD: float = 0.60
+    ES_SCORE_WEIGHT: float = 0.55
+    AGREEMENT_WEIGHT: float = 0.20
+    SEMANTIC_MATCH_THRESHOLD: float = 0.30
+    LEXICAL_MATCH_THRESHOLD: float = 0.30
 
 
 @lru_cache

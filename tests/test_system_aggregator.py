@@ -23,7 +23,7 @@ def hit(
 
 
 def test_system_aggregator_selection_thresholds() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.45)
+    aggregator = SystemAggregator(selection_threshold=0.7)
     decisions = aggregator.aggregate(
         [
             hit("strong", "memo_system", vector_score=0.82),
@@ -34,9 +34,9 @@ def test_system_aggregator_selection_thresholds() -> None:
     )
 
     by_system = {decision.system_id: decision for decision in decisions}
-    assert by_system["memo_system"].confidence == 0.492
+    assert by_system["memo_system"].confidence == 0.82
     assert by_system["memo_system"].selected is True
-    assert by_system["album_system"].confidence == 0.36
+    assert by_system["album_system"].confidence == 0.6
     assert by_system["album_system"].selected is False
     assert by_system["todo_system"].selected is False
 
@@ -60,8 +60,8 @@ def test_system_aggregator_limits_evidence_sorts_and_applies_max_systems() -> No
     assert [doc.doc_id for doc in a_decision.evidence_docs] == ["a1", "a2", "a3"]
 
 
-def test_bm25_score_uses_query_level_normalization() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.3)
+def test_es_score_is_normalized_within_the_query() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.4)
 
     decisions = aggregator.aggregate(
         [
@@ -72,14 +72,14 @@ def test_bm25_score_uses_query_level_normalization() -> None:
     )
 
     by_system = {decision.system_id: decision for decision in decisions}
-    assert by_system["memo_system"].confidence == 0.35
+    assert by_system["memo_system"].confidence == 0.55
     assert by_system["memo_system"].selected is True
-    assert by_system["album_system"].confidence == 0.175
+    assert by_system["album_system"].confidence == 0.275
     assert by_system["album_system"].selected is False
 
 
 def test_agreement_boost_requires_semantic_and_lexical_signals() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.55)
+    aggregator = SystemAggregator(selection_threshold=0.6)
 
     semantic_only = aggregator.aggregate(
         [hit("semantic_only", "memo_system", vector_score=0.4)],
@@ -91,33 +91,34 @@ def test_agreement_boost_requires_semantic_and_lexical_signals() -> None:
                 "bm25_with_semantic",
                 "memo_system",
                 vector_score=0.4,
-                bm25_score=1.0,
+                bm25_score=10.0,
                 bm25_rank=1,
             )
         ],
         max_systems=5,
     )
 
-    assert semantic_only[0].confidence == 0.24
+    assert semantic_only[0].confidence == 0.4
     assert semantic_only[0].selected is False
-    assert semantic_and_lexical[0].confidence == 0.64
+    assert semantic_and_lexical[0].confidence == 0.6765
     assert semantic_and_lexical[0].selected is True
 
 
-def test_keyword_match_can_supply_lexical_signal_without_bm25() -> None:
-    aggregator = SystemAggregator(selection_threshold=0.5)
+def test_agreement_boost_requires_both_minimum_thresholds() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.6)
 
     decisions = aggregator.aggregate(
         [
             hit(
-                "vector_with_keywords",
+                "strong_es_weak_vector",
                 "memo_system",
-                vector_score=0.4,
-                matched_keywords=["allergy", "seafood"],
+                vector_score=0.2,
+                bm25_score=10.0,
+                bm25_rank=1,
             )
         ],
         max_systems=5,
     )
 
-    assert decisions[0].confidence == 0.43
+    assert decisions[0].confidence == 0.55
     assert decisions[0].selected is False
