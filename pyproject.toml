@@ -10,8 +10,6 @@ dependencies = [
     "numpy",
     "python-dotenv",
     "huggingface-hub>=1.22.0",
-    "jieba",
-    "setuptools<81",
     "sentence-transformers",
     "faiss-cpu",
 ]

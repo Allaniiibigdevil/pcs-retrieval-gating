@@ -13,7 +13,6 @@ class LocalElasticsearchRetriever:
         self.fields = [
             f"summary^{settings.LOCAL_ES_SUMMARY_BOOST}",
             f"keywords^{settings.LOCAL_ES_KEYWORDS_BOOST}",
-            f"search_text^{settings.LOCAL_ES_SEARCH_TEXT_BOOST}",
         ]
 
     async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
@@ -33,18 +32,34 @@ class LocalElasticsearchRetriever:
                     }
                 },
                 "size": top_k,
+                "highlight": {
+                    "fields": {
+                        "keywords": {"number_of_fragments": 0},
+                        "summary": {"number_of_fragments": 2},
+                    }
+                },
             },
         )
         hits: list[SearchHit] = []
         for rank, item in enumerate(response.get("hits", {}).get("hits", []), start=1):
             source = item.get("_source", {})
+            highlight = item.get("highlight", {})
+            metadata = dict(source.get("metadata", {}))
+            if highlight:
+                metadata["highlight"] = highlight
+            matched_keywords = _matched_keywords_from_highlight(
+                list(source.get("keywords", [])),
+                highlight.get("keywords", []),
+            )
+            if matched_keywords:
+                metadata["matched_keywords"] = matched_keywords
             hits.append(
                 SearchHit(
                     doc_id=source.get("doc_id") or item.get("_id"),
                     system_id=source["system_id"],
                     summary=source.get("summary"),
                     keywords=list(source.get("keywords", [])),
-                    metadata=dict(source.get("metadata", {})),
+                    metadata=metadata,
                     bm25_score=float(item.get("_score") or 0.0),
                     bm25_rank=rank,
                 )
@@ -62,3 +77,24 @@ class LocalElasticsearchRetriever:
         with request.urlopen(req, timeout=get_settings().LOCAL_ES_TIMEOUT_SECONDS) as response:
             payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else {}
+
+
+def _strip_highlight_tags(text: str) -> str:
+    return text.replace("<em>", "").replace("</em>", "")
+
+
+def _matched_keywords_from_highlight(
+    keywords: list[str],
+    highlighted_keywords: list[str],
+) -> list[str]:
+    if not highlighted_keywords:
+        return []
+
+    highlighted = {_strip_highlight_tags(item) for item in highlighted_keywords}
+    matches: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        if keyword in highlighted and keyword not in seen:
+            seen.add(keyword)
+            matches.append(keyword)
+    return matches

@@ -1,4 +1,4 @@
-{"doc_id":"1","system_id":"photo","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{},"bm25_text":"照片上一只狗 宠物狗 小白","bm25_tokens":["狗","宠物狗","小白"],"embedding_text":"system: photo\nsummary: 照片上一只狗\nkeywords: 宠物狗, 小白","faiss_id":0}
-{"doc_id":"2","system_id":"photo","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{},"bm25_text":"照片是一张全家福，三口之家，小孩是男孩 全家福","bm25_tokens":["全家福","三口之家","小孩","男孩"],"embedding_text":"system: photo\nsummary: 照片是一张全家福，三口之家，小孩是男孩\nkeywords: 全家福","faiss_id":1}
-{"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{},"bm25_text":"记录了用户对海鲜过敏 过敏 海鲜过敏","bm25_tokens":["海鲜","过敏","海鲜过敏"],"embedding_text":"system: notepad\nsummary: 记录了用户对海鲜过敏\nkeywords: 过敏, 海鲜过敏","faiss_id":2}
-{"doc_id":"4","system_id":"notepad","summary":"记录了用户的身份证号码、银行卡号","keywords":["身份证","银行卡"],"metadata":{},"bm25_text":"记录了用户的身份证号码、银行卡号 身份证 银行卡","bm25_tokens":["身份证号码","身份证","银行卡号","银行卡"],"embedding_text":"system: notepad\nsummary: 记录了用户的身份证号码、银行卡号\nkeywords: 身份证, 银行卡","faiss_id":3}
+{"doc_id":"1","system_id":"photo","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
+{"doc_id":"2","system_id":"photo","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{}}
+{"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{}}
+{"doc_id":"4","system_id":"notepad","summary":"记录了用户的身份证号码、银行卡号","keywords":["身份证","银行卡"],"metadata":{}}

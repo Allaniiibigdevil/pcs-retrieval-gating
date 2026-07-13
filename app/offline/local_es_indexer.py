@@ -2,7 +2,6 @@ import json
 from urllib import error, request
 
 from app.config import get_settings
-from app.retrieval.tokenizer import build_keyword_text
 from app.schemas.doc import SourceDoc
 
 
@@ -38,7 +37,6 @@ class LocalElasticsearchIndexer:
                     "system_id": {"type": "keyword"},
                     "summary": text_field,
                     "keywords": text_field,
-                    "search_text": text_field,
                     "metadata": {"enabled": False},
                 }
             },
@@ -65,7 +63,6 @@ class LocalElasticsearchIndexer:
             "system_id": doc.system_id,
             "summary": doc.summary,
             "keywords": doc.keywords,
-            "search_text": build_keyword_text(doc),
             "metadata": doc.metadata,
             "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
         }
