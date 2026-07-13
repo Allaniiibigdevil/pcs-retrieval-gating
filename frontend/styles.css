@@ -428,7 +428,6 @@ input:focus {
   background: var(--accent);
 }
 
-.reason,
 .evidence,
 .doc-summary,
 .doc-meta {

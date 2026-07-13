@@ -265,8 +265,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
           "bm25_rank": 1,
           "vector_rank": 1
         }
-      ],
-      "reason": "命中相关关键词：海鲜过敏"
+      ]
     }
   ],
   "latency_ms": {}

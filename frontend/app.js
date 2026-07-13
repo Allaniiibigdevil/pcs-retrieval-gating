@@ -177,7 +177,6 @@ function renderDecision(data) {
               <strong>${formatNumber(item.confidence)}</strong>
               <span>confidence</span>
             </div>
-            <div class="reason">${escapeHtml(item.reason)}</div>
           </div>
           <div class="evidence">
             <strong>证据</strong>

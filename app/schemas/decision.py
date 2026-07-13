@@ -25,7 +25,6 @@ class SystemDecision(BaseModel):
     selected: bool
     confidence: float
     evidence_docs: list[EvidenceDoc]
-    reason: str
 
 
 class DecideResponse(BaseModel):
