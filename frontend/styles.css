@@ -674,8 +674,11 @@ pre {
 }
 
 .hit-highlight {
+  border-radius: 4px;
+  background: rgba(199, 0, 11, 0.12);
   color: var(--accent);
   font-weight: 900;
+  padding: 0 2px;
 }
 
 .keyword-badge.matched {

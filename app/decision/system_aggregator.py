@@ -54,6 +54,19 @@ def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
     return normalized
 
 
+def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
+    highlight = doc.metadata.get("highlight")
+    if not isinstance(highlight, dict):
+        return {}
+
+    normalized: dict[str, list[str]] = {}
+    for field in ("summary", "keywords"):
+        values = highlight.get(field)
+        if isinstance(values, list):
+            normalized[field] = [str(value) for value in values]
+    return normalized
+
+
 class SystemAggregator:
     def __init__(self, selection_threshold: float | None = None) -> None:
         settings = get_settings()
