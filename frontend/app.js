@@ -61,8 +61,8 @@ function escapeHtml(value) {
 function renderHighlightedText(value, fallback = "") {
   const text = String(value ?? fallback ?? "");
   return escapeHtml(text)
-    .replaceAll("&lt;em&gt;", '<span class="hit-highlight">')
-    .replaceAll("&lt;/em&gt;", "</span>");
+    .replaceAll("&lt;em&gt;", '<mark class="hit-highlight">')
+    .replaceAll("&lt;/em&gt;", "</mark>");
 }
 
 function highlightPlainText(value, terms = []) {
@@ -73,7 +73,7 @@ function highlightPlainText(value, terms = []) {
   }
 
   const pattern = uniqueTerms.map(escapeRegExp).join("|");
-  return escapeHtml(text).replace(new RegExp(`(${pattern})`, "gi"), '<span class="hit-highlight">$1</span>');
+  return escapeHtml(text).replace(new RegExp(`(${pattern})`, "gi"), '<mark class="hit-highlight">$1</mark>');
 }
 
 function escapeRegExp(value) {
