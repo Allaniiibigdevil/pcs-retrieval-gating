@@ -21,8 +21,6 @@ class Settings(BaseSettings):
     LOCAL_DATA_DIR: str = "data"
     LOCAL_RAW_DOCS_PATH: str = "data/raw/docs.jsonl"
     LOCAL_ARTIFACT_DIR: str = "data/artifacts"
-    LOCAL_SYNONYMS_PATH: str = "examples/dicts/synonyms.txt"
-    LOCAL_STOPWORDS_PATH: str = "examples/dicts/stopwords.txt"
 
     LOCAL_ES_URL: str = "http://127.0.0.1:9200"
     LOCAL_ES_INDEX: str = "pcs_retrieval_docs"
@@ -34,7 +32,6 @@ class Settings(BaseSettings):
     LOCAL_ES_INDEX_ON_BUILD: bool = False
     LOCAL_ES_SUMMARY_BOOST: float = 1.0
     LOCAL_ES_KEYWORDS_BOOST: float = 3.0
-    LOCAL_ES_SEARCH_TEXT_BOOST: float = 1.5
 
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"

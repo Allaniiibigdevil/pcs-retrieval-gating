@@ -44,7 +44,7 @@ app/
   retrieval/      本地 ES、本地 FAISS、候选合并、retriever factory
   schemas/        Pydantic 请求 / 响应模型
   storage/        本地 JSONL 文档存储和 artifact 存储
-  utils/          日志、计时等工具
+  utils/          计时等工具
 
 data/
   raw/            本地原始文档，git 忽略
@@ -88,8 +88,6 @@ LOCAL_ES_INDEX=pcs_retrieval_docs
 LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
-LOCAL_SYNONYMS_PATH=examples/dicts/synonyms.txt
-LOCAL_STOPWORDS_PATH=examples/dicts/stopwords.txt
 
 SYSTEM_SELECTION_THRESHOLD=0.60
 ES_SCORE_WEIGHT=0.55
@@ -113,13 +111,9 @@ ES 词法检索：使用 normalized query
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
-本地 Python tokenizer 仍用于 query 归一化和证据关键词匹配。线上词法检索由本地 ES 提供。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK 或自定义同义词 / 停用词 / 领域词 analyzer，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
+线上词法检索和优先证据关键词匹配由本地 ES 提供：ES 检索会请求 `keywords` / `summary` highlight，并优先使用 `keywords` highlight 生成 `matched_keywords`。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK 或自定义同义词 / 停用词 / 领域词 analyzer，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
 
-本地证据关键词匹配支持两类可选词表：
-- `LOCAL_SYNONYMS_PATH`：同义词表，支持 `海鲜,水产,虾蟹` 或 `海鲜 => 水产,虾蟹` 两种写法。
-- `LOCAL_STOPWORDS_PATH`：停用词表，每行一个词，只影响本地 tokenizer，不影响 embedding。
-
-词表会影响在线证据关键词匹配以及 query 归一化相关逻辑。修改 ES analyzer 词表后，建议用 `--index-es` 重新构建 ES 索引。
+ES 证据匹配由 ES analyzer 决定。修改 ES analyzer 词表后，建议用 `--index-es` 重新构建 ES 索引。
 
 ## 评分机制
 
@@ -308,7 +302,7 @@ uv run python -m compileall app tests
 - 本地模式使用本地 ES，不使用 GaussDB。
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
-- 词法检索使用本地 ES analyzer；本地 tokenizer 仅用于 query 归一化和证据关键词匹配。
+- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight。
 - 向量检索使用原始 query，不做停用词删除。
 - 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
 - 最终输出目标是子系统选择，不是文档排序。
