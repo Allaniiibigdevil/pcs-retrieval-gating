@@ -122,3 +122,27 @@ def test_agreement_boost_requires_both_minimum_thresholds() -> None:
 
     assert decisions[0].confidence == 0.55
     assert decisions[0].selected is False
+
+
+def test_system_aggregator_exposes_doc_keywords_and_es_highlight() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.1)
+    source = hit(
+        "allergy",
+        "notepad",
+        bm25_score=3.0,
+        bm25_rank=1,
+        matched_keywords=["海鲜过敏"],
+    )
+    source.metadata["highlight"] = {
+        "summary": ["记录了用户对<em>海鲜</em>过敏"],
+        "keywords": ["<em>海鲜过敏</em>"],
+    }
+
+    decision = aggregator.aggregate([source], max_systems=1)[0]
+
+    assert decision.evidence_docs[0].keywords == ["海鲜过敏"]
+    assert decision.evidence_docs[0].matched_keywords == ["海鲜过敏"]
+    assert decision.evidence_docs[0].highlight == {
+        "summary": ["记录了用户对<em>海鲜</em>过敏"],
+        "keywords": ["<em>海鲜过敏</em>"],
+    }

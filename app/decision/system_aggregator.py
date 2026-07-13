@@ -41,19 +41,17 @@ def simple_doc_strength(hit: SearchHit, max_es_score: float = 0.0) -> float:
     )
 
 
-def build_reason(system_id: str, evidence_docs: list[SearchHit]) -> str:
-    del system_id
-    seen: set[str] = set()
-    keywords: list[str] = []
-    for doc in evidence_docs:
-        for keyword in doc.metadata.get("matched_keywords", []):
-            if keyword not in seen:
-                seen.add(keyword)
-                keywords.append(keyword)
+def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
+    highlight = doc.metadata.get("highlight")
+    if not isinstance(highlight, dict):
+        return {}
 
-    if keywords:
-        return f"命中相关关键词：{', '.join(keywords)}"
-    return "存在相关摘要证据。"
+    normalized: dict[str, list[str]] = {}
+    for field in ("summary", "keywords"):
+        values = highlight.get(field)
+        if isinstance(values, list):
+            normalized[field] = [str(value) for value in values]
+    return normalized
 
 
 class SystemAggregator:
@@ -94,7 +92,9 @@ class SystemAggregator:
                         EvidenceDoc(
                             doc_id=doc.doc_id,
                             summary=doc.summary,
+                            keywords=list(doc.keywords),
                             matched_keywords=list(doc.metadata.get("matched_keywords", [])),
+                            highlight=_highlight_from_metadata(doc),
                             bm25_score=doc.bm25_score,
                             vector_score=doc.vector_score,
                             bm25_rank=doc.bm25_rank,
@@ -102,7 +102,6 @@ class SystemAggregator:
                         )
                         for doc in top_docs
                     ],
-                    reason=build_reason(system_id, top_docs),
                 )
             )
 

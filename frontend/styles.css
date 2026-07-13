@@ -428,7 +428,6 @@ input:focus {
   background: var(--accent);
 }
 
-.reason,
 .evidence,
 .doc-summary,
 .doc-meta {
@@ -666,4 +665,26 @@ pre {
   .selected-summary {
     text-align: left;
   }
+}
+
+.evidence-doc-card {
+  border-color: var(--line);
+  box-shadow: none;
+  padding: 12px;
+}
+
+.hit-highlight {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.keyword-badge.matched {
+  border-color: rgba(199, 0, 11, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.fragment-gap {
+  color: var(--muted);
+  font-weight: 800;
 }

@@ -254,14 +254,18 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
         {
           "doc_id": "3",
           "summary": "记录了用户对海鲜过敏",
+          "keywords": ["海鲜过敏", "饮食禁忌"],
           "matched_keywords": ["海鲜过敏"],
+          "highlight": {
+            "summary": ["记录了用户对<em>海鲜</em>过敏"],
+            "keywords": ["<em>海鲜过敏</em>"]
+          },
           "bm25_score": 1.2,
           "vector_score": 0.84,
           "bm25_rank": 1,
           "vector_rank": 1
         }
-      ],
-      "reason": "命中相关关键词：海鲜过敏"
+      ]
     }
   ],
   "latency_ms": {}
@@ -302,7 +306,7 @@ uv run python -m compileall app tests
 - 本地模式使用本地 ES，不使用 GaussDB。
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
-- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight。
+- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
 - 向量检索使用原始 query，不做停用词删除。
 - 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
 - 最终输出目标是子系统选择，不是文档排序。

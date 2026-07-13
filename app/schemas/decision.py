@@ -11,7 +11,9 @@ class DecideRequest(BaseModel):
 class EvidenceDoc(BaseModel):
     doc_id: str
     summary: str | None = None
+    keywords: list[str] = Field(default_factory=list)
     matched_keywords: list[str] = Field(default_factory=list)
+    highlight: dict[str, list[str]] = Field(default_factory=dict)
     bm25_score: float | None = None
     vector_score: float | None = None
     bm25_rank: int | None = None
@@ -23,7 +25,6 @@ class SystemDecision(BaseModel):
     selected: bool
     confidence: float
     evidence_docs: list[EvidenceDoc]
-    reason: str
 
 
 class DecideResponse(BaseModel):
