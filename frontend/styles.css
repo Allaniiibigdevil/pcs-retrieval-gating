@@ -667,3 +667,28 @@ pre {
     text-align: left;
   }
 }
+
+.evidence-doc-card {
+  border-color: var(--line);
+  box-shadow: none;
+  padding: 12px;
+}
+
+.hit-highlight {
+  border-radius: 4px;
+  background: rgba(199, 0, 11, 0.12);
+  color: var(--accent);
+  font-weight: 900;
+  padding: 0 2px;
+}
+
+.keyword-badge.matched {
+  border-color: rgba(199, 0, 11, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.fragment-gap {
+  color: var(--muted);
+  font-weight: 800;
+}
