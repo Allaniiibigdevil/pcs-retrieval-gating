@@ -98,16 +98,11 @@ LEXICAL_MATCH_THRESHOLD=0.30
 
 ## 查询处理
 
-ES 词法检索和向量检索使用不同的 query：
-
-```text
-ES 词法检索：使用 normalized query
-向量检索：使用原始 query
-```
+ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做同义词替换、不做大小写归一化。
 
 原因：
 
-- ES 是词法检索，适合做基础归一化，并在 ES analyzer 中承接分词、同义词、停用词和领域词配置。
+- ES 是词法检索，分词、大小写归一化、同义词、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
