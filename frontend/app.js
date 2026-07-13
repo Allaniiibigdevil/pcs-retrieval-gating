@@ -58,6 +58,53 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function renderHighlightedText(value, fallback = "") {
+  const text = String(value ?? fallback ?? "");
+  return escapeHtml(text)
+    .replaceAll("&lt;em&gt;", '<span class="hit-highlight">')
+    .replaceAll("&lt;/em&gt;", "</span>");
+}
+
+function highlightPlainText(value, terms = []) {
+  const text = String(value ?? "");
+  const uniqueTerms = [...new Set((terms || []).filter(Boolean).map(String))].sort((a, b) => b.length - a.length);
+  if (!text || !uniqueTerms.length) {
+    return escapeHtml(text);
+  }
+
+  const pattern = uniqueTerms.map(escapeRegExp).join("|");
+  return escapeHtml(text).replace(new RegExp(`(${pattern})`, "gi"), '<span class="hit-highlight">$1</span>');
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderSummaryWithHighlight(doc) {
+  const summaryHighlights = doc.highlight?.summary || doc.metadata?.highlight?.summary || [];
+  if (summaryHighlights.length) {
+    return summaryHighlights.map((item) => renderHighlightedText(item)).join(' <span class="fragment-gap">...</span> ');
+  }
+  return highlightPlainText(doc.summary || "", doc.matched_keywords || doc.metadata?.matched_keywords || []);
+}
+
+function renderKeywordBadges(keywords = [], matchedKeywords = [], highlight = {}) {
+  const matched = new Set(matchedKeywords || []);
+  const highlightedKeywords = new Map(
+    (highlight.keywords || []).map((item) => [String(item).replaceAll("<em>", "").replaceAll("</em>", ""), item]),
+  );
+
+  return (keywords || [])
+    .map((item) => {
+      const highlighted = highlightedKeywords.get(item);
+      const isMatched = matched.has(item) || highlighted;
+      return `<span class="badge keyword-badge ${isMatched ? "matched" : ""}">${
+        highlighted ? renderHighlightedText(highlighted) : highlightPlainText(item, isMatched ? [item] : [])
+      }</span>`;
+    })
+    .join("");
+}
+
 function addMessage(role, text) {
   const node = document.createElement("div");
   node.className = `message ${role}`;
@@ -103,11 +150,17 @@ function renderDecision(data) {
       const evidence = (item.evidence_docs || [])
         .map(
           (doc) => `
-            <div class="evidence-item">
-              <strong>${escapeHtml(doc.doc_id)}</strong>
-              <div>${escapeHtml(doc.summary || "")}</div>
-              <div>BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)}</div>
-            </div>
+            <article class="doc-card evidence-doc-card">
+              <div class="doc-topline">
+                <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
+                <span class="badge system-badge">${escapeHtml(item.system_id)}</span>
+              </div>
+              <div class="doc-summary">${renderSummaryWithHighlight(doc)}</div>
+              <div class="keyword-list">
+                ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
+              </div>
+              <div class="doc-meta">BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)}</div>
+            </article>
           `,
         )
         .join("");
@@ -124,7 +177,6 @@ function renderDecision(data) {
               <strong>${formatNumber(item.confidence)}</strong>
               <span>confidence</span>
             </div>
-            <div class="reason">${escapeHtml(item.reason)}</div>
           </div>
           <div class="evidence">
             <strong>证据</strong>
@@ -179,7 +231,7 @@ function renderDocs() {
           </div>
           <div class="doc-summary">${escapeHtml(doc.summary || "")}</div>
           <div class="keyword-list">
-            ${(doc.keywords || []).map((item) => `<span class="badge keyword-badge">${escapeHtml(item)}</span>`).join("")}
+            ${renderKeywordBadges(doc.keywords || [], [], doc.metadata?.highlight || {})}
           </div>
           <div class="doc-meta">${escapeHtml(JSON.stringify(doc.metadata || {}))}</div>
         </article>

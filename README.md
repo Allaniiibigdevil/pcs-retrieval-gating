@@ -98,16 +98,11 @@ LEXICAL_MATCH_THRESHOLD=0.30
 
 ## 查询处理
 
-ES 词法检索和向量检索使用不同的 query：
-
-```text
-ES 词法检索：使用 normalized query
-向量检索：使用原始 query
-```
+ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做同义词替换、不做大小写归一化。
 
 原因：
 
-- ES 是词法检索，适合做基础归一化，并在 ES analyzer 中承接分词、同义词、停用词和领域词配置。
+- ES 是词法检索，分词、大小写归一化、同义词、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
@@ -254,14 +249,18 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
         {
           "doc_id": "3",
           "summary": "记录了用户对海鲜过敏",
+          "keywords": ["海鲜过敏", "饮食禁忌"],
           "matched_keywords": ["海鲜过敏"],
+          "highlight": {
+            "summary": ["记录了用户对<em>海鲜</em>过敏"],
+            "keywords": ["<em>海鲜过敏</em>"]
+          },
           "bm25_score": 1.2,
           "vector_score": 0.84,
           "bm25_rank": 1,
           "vector_rank": 1
         }
-      ],
-      "reason": "命中相关关键词：海鲜过敏"
+      ]
     }
   ],
   "latency_ms": {}
@@ -302,7 +301,7 @@ uv run python -m compileall app tests
 - 本地模式使用本地 ES，不使用 GaussDB。
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
-- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight。
-- 向量检索使用原始 query，不做停用词删除。
+- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
+- 词法检索和向量检索都不在应用层做停用词删除；ES 相关处理交给 analyzer。
 - 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
 - 最终输出目标是子系统选择，不是文档排序。
