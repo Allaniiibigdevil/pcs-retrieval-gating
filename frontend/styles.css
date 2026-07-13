@@ -674,10 +674,15 @@ pre {
 }
 
 .hit-highlight {
-  background: transparent;
-  color: var(--accent);
-  font-weight: 900;
+  background: transparent !important;
+  color: #dc2626 !important;
+  font-weight: 700;
   padding: 0;
+}
+
+mark.hit-highlight {
+  background: transparent !important;
+  color: #dc2626 !important;
 }
 
 .keyword-badge.matched {
