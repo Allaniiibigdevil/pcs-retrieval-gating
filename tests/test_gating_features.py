@@ -4,6 +4,7 @@ import numpy as np
 
 from app.decision.gating_features import append_gating_feature_rows, build_gating_feature_rows
 from app.ml.logistic_regression import train_logistic_regression
+from app.offline.train_gating_model import load_rows
 from app.schemas.search import SearchHit
 
 
@@ -27,19 +28,14 @@ def test_build_gating_feature_rows_extracts_system_level_features(tmp_path) -> N
     by_system = {row.system_id: row for row in rows}
 
     assert by_system["memo"].vector_top1 == 0.8
-    assert by_system["memo"].vector_top3_mean == 0.7
     assert by_system["memo"].vector_best_rank_score == 0.5
-    assert by_system["memo"].vector_hit_count == 2.0
     assert by_system["memo"].es_top1_norm == 1.0
     assert by_system["memo"].es_best_rank_score == 1.0
-    assert by_system["memo"].es_hit_count == 1.0
     assert by_system["memo"].same_doc_hit_by_both == 1.0
     assert by_system["memo"].same_system_hit_by_both == 1.0
     assert by_system["album"].es_top1_norm == 0.5
     assert by_system["calendar"].vector_top1 == 0.0
-    assert by_system["calendar"].vector_hit_count == 0.0
     assert by_system["calendar"].es_top1_norm == 0.0
-    assert by_system["calendar"].es_hit_count == 0.0
 
     output = tmp_path / "samples.jsonl"
     append_gating_feature_rows(rows, output)
@@ -48,19 +44,47 @@ def test_build_gating_feature_rows_extracts_system_level_features(tmp_path) -> N
     assert payload["label"] is None
 
 
+def test_load_rows_ignores_removed_aggregate_features(tmp_path) -> None:
+    row = {
+        "query": "query",
+        "system_id": "memo",
+        "task_id": "t1",
+        "label": 1,
+        "vector_top1": 0.8,
+        "vector_top3_mean": 0.7,
+        "vector_best_rank_score": 0.5,
+        "vector_hit_count": 2.0,
+        "es_top1_norm": 1.0,
+        "es_top3_mean": 1.0,
+        "es_best_rank_score": 1.0,
+        "es_hit_count": 1.0,
+        "same_doc_hit_by_both": 1.0,
+        "same_system_hit_by_both": 1.0,
+    }
+    path = tmp_path / "samples.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    rows = load_rows(path)
+
+    assert len(rows) == 1
+    assert rows[0].feature_vector() == [0.8, 0.5, 1.0, 1.0, 1.0, 1.0]
+
+
 def test_logistic_regression_training_learns_simple_boundary() -> None:
     features = np.array(
         [
-            [1, 1, 1, 3, 1, 1, 1, 2, 1, 1],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0.9, 0.8, 1, 2, 0.8, 0.7, 1, 1, 1, 1],
-            [0.1, 0.1, 0, 1, 0.1, 0.1, 0, 1, 0, 0],
+            [1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0],
+            [0.9, 1, 0.8, 1, 1, 1],
+            [0.1, 0, 0.1, 0, 0, 0],
         ],
         dtype=float,
     )
     labels = np.array([1, 0, 1, 0], dtype=float)
 
-    model = train_logistic_regression(features, labels, learning_rate=0.5, epochs=200)
+    model = train_logistic_regression(
+        features, labels, learning_rate=0.05, epochs=300, batch_size=2, seed=7
+    )
     probs = model.predict_proba(features)
 
     assert probs[0] > 0.8

@@ -1328,6 +1328,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "sentence-transformers" },
+    { name = "torch" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1353,6 +1354,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sentence-transformers" },
+    { name = "torch" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 provides-extras = ["dev"]

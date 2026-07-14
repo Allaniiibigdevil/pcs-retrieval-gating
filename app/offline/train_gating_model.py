@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields
 import json
 from pathlib import Path
 
@@ -11,13 +12,18 @@ from app.ml.logistic_regression import train_logistic_regression
 
 def load_rows(path: Path) -> list[GatingFeatureRow]:
     rows: list[GatingFeatureRow] = []
+    row_fields = {field.name for field in fields(GatingFeatureRow)}
     with path.open("r", encoding="utf-8") as file:
         for line in file:
             line = line.strip()
             if not line:
                 continue
             payload = json.loads(line)
-            rows.append(GatingFeatureRow(**payload))
+            rows.append(
+                GatingFeatureRow(
+                    **{key: value for key, value in payload.items() if key in row_fields}
+                )
+            )
     return rows
 
 
@@ -31,6 +37,8 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--l2", type=float, default=0.0)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
 
     rows = load_rows(Path(args.input))
@@ -41,6 +49,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         epochs=args.epochs,
         l2=args.l2,
+        batch_size=args.batch_size,
+        seed=args.seed,
     )
     model.save(args.output)
     print(f"trained rows={len(labels)} output={args.output}")

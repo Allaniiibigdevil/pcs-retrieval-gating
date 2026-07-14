@@ -311,13 +311,9 @@ uv run python -m compileall app tests
 每次调用 `/v1/decide` 时，服务会按候选 `system_id` 追加写入一行 JSONL 训练样本，默认路径是 `data/gating/training_samples.jsonl`。样本包含原始 `query`、`task_id`、`system_id`、待人工标注的 `label` 以及以下特征：
 
 - `vector_top1`
-- `vector_top3_mean`
 - `vector_best_rank_score`
-- `vector_hit_count`
 - `es_top1_norm`
-- `es_top3_mean`
 - `es_best_rank_score`
-- `es_hit_count`
 - `same_doc_hit_by_both`
 - `same_system_hit_by_both`
 
@@ -326,8 +322,11 @@ uv run python -m compileall app tests
 ```bash
 uv run python -m app.offline.train_gating_model \
   --input data/gating/training_samples.jsonl \
-  --output data/gating/logistic_regression_model.json
+  --output data/gating/logistic_regression_model.json \
+  --batch-size 32
 ```
+
+训练实现使用 PyTorch `nn.Linear` + `BCEWithLogitsLoss`，默认按 mini-batch（`--batch-size 32`）shuffle 训练，并通过 `--seed` 固定随机性；如果样本量很小，实际 batch 会自动裁剪到样本数。当前特征采用“最强证据”方案：只保留每一路召回的 top1 强度、最佳 rank 以及双路命中信号，不再使用 `top3_mean` 或命中数量，避免与 top1/rank 信号高度共线。
 
 训练后如需用逻辑回归替换固定打分，将配置改为：
 
@@ -340,6 +339,4 @@ GATING_MODEL_PATH=data/gating/logistic_regression_model.json
 
 未召回的系统也会作为样本写入。默认 `GATING_INCLUDE_UNRECALLED_SYSTEMS=true` 时，服务会从本地索引 artifact 中读取完整 `system_id` 集合；没有被 ES 或向量检索召回的系统会以全 0 特征写入 JSONL，方便人工标注为负样本。这样训练集既包含被召回候选的排序/强度学习样本，也包含“完全没命中时不该选”的负样本。
 
-`vector_hit_count` 和 `es_hit_count` 是当前 query 下单个系统分别被向量检索和 ES 检索命中的候选文档数。ES 在没有词法匹配、检索异常或 top-k 截断时可以为 0；vector 在索引非空且检索正常时通常会返回全局 top-k，但按 system_id 聚合后，某个具体系统仍可能为 0。
-
-`top_k_docs` 会影响训练样本：如果某个系统没有进入 ES 或 vector 的 top-k，它在样本中会表现为未召回或只被一路召回。通常 top10 之后的单条文档很难靠固定规则直接入选，但仍可能影响 `top3_mean`、双路命中等聚合特征。实际建议是线上采集阶段先保持一个略大的 top-k（例如 30-50）以避免早期漏采弱正例；标注和训练稳定后，再根据召回覆盖率、正例在 rank 分布中的位置、延迟和模型效果下调 top-k。
+`top_k_docs` 会影响训练样本：如果某个系统没有进入 ES 或 vector 的 top-k，它在样本中会表现为未召回或只被一路召回。通常 top10 之后的单条文档很难靠固定规则直接入选，但仍可能影响 top1、最佳 rank、双路命中等聚合特征。实际建议是线上采集阶段先保持一个略大的 top-k（例如 30-50）以避免早期漏采弱正例；标注和训练稳定后，再根据召回覆盖率、正例在 rank 分布中的位置、延迟和模型效果下调 top-k。

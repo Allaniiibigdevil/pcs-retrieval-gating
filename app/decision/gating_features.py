@@ -5,7 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 import json
 import logging
-from typing import Iterable
 
 from app.config import get_settings
 from app.schemas.search import SearchHit
@@ -15,13 +14,9 @@ logger = logging.getLogger(__name__)
 
 FEATURE_NAMES = [
     "vector_top1",
-    "vector_top3_mean",
     "vector_best_rank_score",
-    "vector_hit_count",
     "es_top1_norm",
-    "es_top3_mean",
     "es_best_rank_score",
-    "es_hit_count",
     "same_doc_hit_by_both",
     "same_system_hit_by_both",
 ]
@@ -34,13 +29,9 @@ class GatingFeatureRow:
     task_id: str | None
     label: int | None
     vector_top1: float
-    vector_top3_mean: float
     vector_best_rank_score: float
-    vector_hit_count: float
     es_top1_norm: float
-    es_top3_mean: float
     es_best_rank_score: float
-    es_hit_count: float
     same_doc_hit_by_both: float
     same_system_hit_by_both: float
 
@@ -67,13 +58,6 @@ def _rank_score(rank: int | None) -> float:
     return 1.0 / float(rank)
 
 
-def _mean_top3(values: Iterable[float]) -> float:
-    top3 = sorted((float(value) for value in values), reverse=True)[:3]
-    if not top3:
-        return 0.0
-    return float(sum(top3) / len(top3))
-
-
 def build_gating_feature_rows(
     query: str,
     evidence_docs: list[SearchHit],
@@ -98,12 +82,6 @@ def build_gating_feature_rows(
         ]
         vector_ranks = [doc.vector_rank for doc in docs if doc.vector_rank is not None]
         es_ranks = [doc.bm25_rank for doc in docs if doc.bm25_rank is not None]
-        vector_hit_count = sum(
-            1 for doc in docs if doc.vector_score is not None or doc.vector_rank is not None
-        )
-        es_hit_count = sum(
-            1 for doc in docs if doc.bm25_score is not None or doc.bm25_rank is not None
-        )
         same_doc = any(doc.vector_score is not None and doc.bm25_score is not None for doc in docs)
         same_system = bool(vector_scores) and bool(es_scores)
 
@@ -114,15 +92,11 @@ def build_gating_feature_rows(
                 task_id=task_id,
                 label=label,
                 vector_top1=max(vector_scores, default=0.0),
-                vector_top3_mean=_mean_top3(vector_scores),
                 vector_best_rank_score=max(
                     (_rank_score(rank) for rank in vector_ranks), default=0.0
                 ),
-                vector_hit_count=float(vector_hit_count),
                 es_top1_norm=max(es_scores, default=0.0),
-                es_top3_mean=_mean_top3(es_scores),
                 es_best_rank_score=max((_rank_score(rank) for rank in es_ranks), default=0.0),
-                es_hit_count=float(es_hit_count),
                 same_doc_hit_by_both=1.0 if same_doc else 0.0,
                 same_system_hit_by_both=1.0 if same_system else 0.0,
             )
