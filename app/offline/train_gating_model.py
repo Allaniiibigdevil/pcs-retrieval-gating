@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields
 import json
 from pathlib import Path
 
@@ -11,13 +12,18 @@ from app.ml.logistic_regression import train_logistic_regression
 
 def load_rows(path: Path) -> list[GatingFeatureRow]:
     rows: list[GatingFeatureRow] = []
+    row_fields = {field.name for field in fields(GatingFeatureRow)}
     with path.open("r", encoding="utf-8") as file:
         for line in file:
             line = line.strip()
             if not line:
                 continue
             payload = json.loads(line)
-            rows.append(GatingFeatureRow(**payload))
+            rows.append(
+                GatingFeatureRow(
+                    **{key: value for key, value in payload.items() if key in row_fields}
+                )
+            )
     return rows
 
 
