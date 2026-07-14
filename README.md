@@ -326,7 +326,7 @@ uv run python -m app.offline.train_gating_model \
   --batch-size 32
 ```
 
-训练实现使用 PyTorch `nn.Linear` + `BCEWithLogitsLoss`，默认按 mini-batch（`--batch-size 32`）shuffle 训练，并通过 `--seed` 固定随机性；如果样本量很小，实际 batch 会自动裁剪到样本数。当前特征采用“最强证据”方案：只保留每一路召回的 top1 强度、最佳 rank 以及双路命中信号，不再使用 `top3_mean` 或命中数量，避免与 top1/rank 信号高度共线。
+训练实现使用 PyTorch `nn.Linear` + `BCEWithLogitsLoss`，默认按 mini-batch（`--batch-size 32`）shuffle 训练，并通过 `--seed` 固定随机性；如果样本量很小，实际 batch 会自动裁剪到样本数。
 
 训练后如需用逻辑回归替换固定打分，将配置改为：
 
