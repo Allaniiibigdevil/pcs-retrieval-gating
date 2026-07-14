@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 
 import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from app.decision.gating_features import FEATURE_NAMES
 
@@ -67,19 +70,58 @@ def train_logistic_regression(
     learning_rate: float = 0.1,
     epochs: int = 1000,
     l2: float = 0.0,
+    batch_size: int = 32,
+    seed: int = 13,
 ) -> LogisticRegressionGatingModel:
     if features.ndim != 2 or features.shape[1] != len(FEATURE_NAMES):
         raise ValueError(f"features must have shape (n, {len(FEATURE_NAMES)})")
     if labels.ndim != 1 or labels.shape[0] != features.shape[0]:
         raise ValueError("labels must have shape (n,)")
 
-    model = LogisticRegressionGatingModel.fresh()
-    n_samples = features.shape[0]
+    if features.shape[0] == 0:
+        raise ValueError("features and labels must contain at least one sample")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than 0")
+
+    torch.manual_seed(seed)
+    feature_tensor = torch.as_tensor(features, dtype=torch.float32)
+    label_tensor = torch.as_tensor(labels, dtype=torch.float32).unsqueeze(1)
+    dataset = TensorDataset(feature_tensor, label_tensor)
+    generator = torch.Generator().manual_seed(seed)
+    loader = DataLoader(
+        dataset,
+        batch_size=min(batch_size, features.shape[0]),
+        shuffle=True,
+        generator=generator,
+    )
+
+    torch_model = nn.Linear(len(FEATURE_NAMES), 1)
+    with torch.no_grad():
+        torch_model.weight.zero_()
+        torch_model.bias.zero_()
+
+    optimizer = torch.optim.AdamW(
+        torch_model.parameters(),
+        lr=learning_rate,
+        weight_decay=l2,
+    )
+    criterion = nn.BCEWithLogitsLoss()
+
+    torch_model.train()
     for _ in range(epochs):
-        probs = model.predict_proba(features)
-        errors = probs - labels
-        grad_w = (features.T @ errors) / n_samples + l2 * model.weights
-        grad_b = float(errors.mean())
-        model.weights -= learning_rate * grad_w
-        model.bias -= learning_rate * grad_b
-    return model
+        for batch_features, batch_labels in loader:
+            optimizer.zero_grad(set_to_none=True)
+            logits = torch_model(batch_features)
+            loss = criterion(logits, batch_labels)
+            loss.backward()
+            optimizer.step()
+
+    torch_model.eval()
+    with torch.no_grad():
+        weights = torch_model.weight.detach().cpu().numpy().reshape(-1).astype(np.float64)
+        bias = float(torch_model.bias.detach().cpu().item())
+    return LogisticRegressionGatingModel(
+        weights=weights,
+        bias=bias,
+        feature_names=list(FEATURE_NAMES),
+    )

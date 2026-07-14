@@ -8,6 +8,7 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "numpy",
+    "torch",
     "python-dotenv",
     "huggingface-hub>=1.22.0",
     "sentence-transformers",

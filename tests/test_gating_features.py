@@ -60,7 +60,9 @@ def test_logistic_regression_training_learns_simple_boundary() -> None:
     )
     labels = np.array([1, 0, 1, 0], dtype=float)
 
-    model = train_logistic_regression(features, labels, learning_rate=0.5, epochs=200)
+    model = train_logistic_regression(
+        features, labels, learning_rate=0.05, epochs=300, batch_size=2, seed=7
+    )
     probs = model.predict_proba(features)
 
     assert probs[0] > 0.8
