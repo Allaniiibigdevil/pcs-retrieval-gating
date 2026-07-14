@@ -326,8 +326,11 @@ uv run python -m compileall app tests
 ```bash
 uv run python -m app.offline.train_gating_model \
   --input data/gating/training_samples.jsonl \
-  --output data/gating/logistic_regression_model.json
+  --output data/gating/logistic_regression_model.json \
+  --batch-size 32
 ```
+
+训练实现使用 PyTorch `nn.Linear` + `BCEWithLogitsLoss`，默认按 mini-batch（`--batch-size 32`）shuffle 训练，并通过 `--seed` 固定随机性；如果样本量很小，实际 batch 会自动裁剪到样本数。
 
 训练后如需用逻辑回归替换固定打分，将配置改为：
 

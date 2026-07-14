@@ -31,6 +31,8 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--l2", type=float, default=0.0)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
 
     rows = load_rows(Path(args.input))
@@ -41,6 +43,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         epochs=args.epochs,
         l2=args.l2,
+        batch_size=args.batch_size,
+        seed=args.seed,
     )
     model.save(args.output)
     print(f"trained rows={len(labels)} output={args.output}")
