@@ -2,6 +2,8 @@ import math
 from collections import defaultdict
 
 from app.config import get_settings
+from app.decision.gating_features import build_gating_feature_rows
+from app.ml.logistic_regression import LogisticRegressionGatingModel
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
 
@@ -75,8 +77,28 @@ class SystemAggregator:
             if selection_threshold is None
             else selection_threshold
         )
+        self.scorer = settings.GATING_SCORER
+        self.model_path = settings.GATING_MODEL_PATH
+        self._model: LogisticRegressionGatingModel | None = None
 
-    def aggregate(self, evidence_docs: list[SearchHit], max_systems: int = 5) -> list[SystemDecision]:
+    def _logistic_confidences(self, evidence_docs: list[SearchHit]) -> dict[str, float]:
+        if self._model is None:
+            self._model = LogisticRegressionGatingModel.load(self.model_path)
+        rows = build_gating_feature_rows("", evidence_docs)
+        if not rows:
+            return {}
+        import numpy as np
+
+        features = np.array([row.feature_vector() for row in rows], dtype=np.float64)
+        probabilities = self._model.predict_proba(features)
+        return {
+            row.system_id: float(prob)
+            for row, prob in zip(rows, probabilities, strict=True)
+        }
+
+    def aggregate(
+        self, evidence_docs: list[SearchHit], max_systems: int = 5
+    ) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
         for doc in evidence_docs:
             grouped[doc.system_id].append(doc)
@@ -84,6 +106,11 @@ class SystemAggregator:
         max_es_score = max(
             (doc.bm25_score or 0.0 for doc in evidence_docs),
             default=0.0,
+        )
+        logistic_confidences = (
+            self._logistic_confidences(evidence_docs)
+            if self.scorer == "logistic_regression"
+            else {}
         )
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():
@@ -93,7 +120,11 @@ class SystemAggregator:
                 reverse=True,
             )
             top_docs = sorted_docs[:3]
-            confidence = simple_doc_strength(top_docs[0], max_es_score) if top_docs else 0.0
+            confidence = (
+                logistic_confidences.get(system_id, 0.0)
+                if self.scorer == "logistic_regression"
+                else simple_doc_strength(top_docs[0], max_es_score) if top_docs else 0.0
+            )
             selected = confidence >= self.selection_threshold
 
             decisions.append(

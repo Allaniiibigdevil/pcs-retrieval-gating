@@ -1,7 +1,14 @@
 import logging
+from uuid import uuid4
 
+from app.config import get_settings
 from app.decision.evidence_builder import EvidenceBuilder
 from app.decision.query_normalizer import QueryNormalizer
+from app.decision.gating_features import (
+    append_gating_feature_rows,
+    build_gating_feature_rows,
+    load_local_system_ids,
+)
 from app.decision.system_aggregator import SystemAggregator
 from app.retrieval.candidate_merger import CandidateMerger
 from app.retrieval.factory import Retriever, get_keyword_retriever, get_vector_retriever
@@ -36,6 +43,7 @@ class DecisionEngine:
         top_k_docs: int = 50,
         max_systems: int = 5,
     ) -> DecideResponse:
+        effective_task_id = task_id or str(uuid4())
         timer = StageTimer()
         bm25_query = self.normalizer.normalize(task)
         vector_query = task
@@ -50,41 +58,69 @@ class DecisionEngine:
             bm25_hits = await self.keyword_retriever.search(bm25_query, top_k_docs)
         except Exception as exc:
             keyword_error = exc
-            logger.exception("keyword_search_failed", extra={"task_id": task_id})
+            logger.exception("keyword_search_failed", extra={"task_id": effective_task_id})
         timer.mark("keyword_search")
+        logger.info(
+            "keyword_search_completed task_id=%s query=%r hit_count=%d",
+            effective_task_id,
+            bm25_query,
+            len(bm25_hits),
+        )
 
         try:
             vector_hits = await self.vector_retriever.search(vector_query, top_k_docs)
         except Exception as exc:
             vector_error = exc
-            logger.exception("vector_search_failed", extra={"task_id": task_id})
+            logger.exception("vector_search_failed", extra={"task_id": effective_task_id})
         timer.mark("vector_search")
+        logger.info(
+            "vector_search_completed task_id=%s query=%r hit_count=%d",
+            effective_task_id,
+            vector_query,
+            len(vector_hits),
+        )
 
         if keyword_error is not None and vector_error is not None:
-            logger.error("decision_failed", extra={"task_id": task_id})
+            logger.error("decision_failed", extra={"task_id": effective_task_id})
             raise RuntimeError("Both ES and vector search failed") from vector_error
 
         candidates = self.merger.merge(bm25_hits, vector_hits)
         timer.mark("merge")
         evidence_docs = self.evidence_builder.build(task, candidates)
+        settings = get_settings()
+        all_system_ids = None
+        if settings.GATING_INCLUDE_UNRECALLED_SYSTEMS:
+            all_system_ids = set(load_local_system_ids())
+        feature_rows = build_gating_feature_rows(
+            task, evidence_docs, task_id=effective_task_id, all_system_ids=all_system_ids
+        )
+        if settings.GATING_FEATURE_LOG_ENABLED:
+            append_gating_feature_rows(feature_rows)
+            logger.info(
+                "gating_features_logged task_id=%s row_count=%d include_unrecalled=%s",
+                effective_task_id,
+                len(feature_rows),
+                settings.GATING_INCLUDE_UNRECALLED_SYSTEMS,
+            )
+
         decisions = self.aggregator.aggregate(evidence_docs, max_systems)
         selected_systems = [item.system_id for item in decisions if item.selected]
         timer.mark("aggregate")
         latency_ms = timer.finish()
 
         logger.info(
-            "decision_completed",
-            extra={
-                "task_id": task_id,
-                "bm25_hit_count": len(bm25_hits),
-                "vector_hit_count": len(vector_hits),
-                "merged_candidate_count": len(candidates),
-                "selected_systems": selected_systems,
-                "latency_ms": latency_ms,
-            },
+            "decision_completed task_id=%s bm25_hits=%d vector_hits=%d "
+            "merged_candidates=%d selected_systems=%s gating_feature_rows=%d latency_ms=%s",
+            effective_task_id,
+            len(bm25_hits),
+            len(vector_hits),
+            len(candidates),
+            selected_systems,
+            len(feature_rows),
+            latency_ms,
         )
         return DecideResponse(
-            task_id=task_id,
+            task_id=effective_task_id,
             task=task,
             selected_systems=selected_systems,
             decisions=decisions,

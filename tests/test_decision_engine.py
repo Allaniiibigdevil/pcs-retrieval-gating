@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from app.decision.decision_engine import DecisionEngine
@@ -15,7 +17,9 @@ class FakeRetriever:
 
 
 @pytest.mark.asyncio
-async def test_decision_engine_returns_selected_systems() -> None:
+async def test_decision_engine_returns_selected_systems(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     engine = DecisionEngine(
         keyword_retriever=FakeRetriever([]),
         vector_retriever=FakeRetriever(
@@ -32,8 +36,26 @@ async def test_decision_engine_returns_selected_systems() -> None:
         aggregator=SystemAggregator(selection_threshold=0.45),
     )
 
+    caplog.set_level(logging.INFO, logger="app.decision.decision_engine")
+
     response = await engine.decide("我可以吃海鲜吗？")
 
+    assert response.task_id is not None
     assert response.selected_systems == ["notepad"]
     assert response.decisions[0].system_id == "notepad"
     assert response.decisions[0].selected is True
+    assert "decision_completed task_id=" in caplog.text
+    assert "vector_search_completed task_id=" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_decision_engine_preserves_provided_task_id() -> None:
+    engine = DecisionEngine(
+        keyword_retriever=FakeRetriever([]),
+        vector_retriever=FakeRetriever([]),
+        aggregator=SystemAggregator(selection_threshold=0.45),
+    )
+
+    response = await engine.decide("随便问一下", task_id="task_001")
+
+    assert response.task_id == "task_001"

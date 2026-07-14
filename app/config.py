@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     SEMANTIC_MATCH_THRESHOLD: float = 0.30
     LEXICAL_MATCH_THRESHOLD: float = 0.30
 
+    GATING_SCORER: str = "fixed"
+    GATING_FEATURE_LOG_ENABLED: bool = True
+    GATING_INCLUDE_UNRECALLED_SYSTEMS: bool = True
+    GATING_TRAINING_DATA_PATH: str = "data/gating/training_samples.jsonl"
+    GATING_MODEL_PATH: str = "data/gating/logistic_regression_model.json"
+
 
 @lru_cache
 def get_settings() -> Settings:
