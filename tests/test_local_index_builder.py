@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from app.embedding.embedding_service import MockEmbeddingService
+from app.embedding.embedding_service import MockEmbeddingService, build_embedding_text
 from app.offline.local_index_builder import LocalIndexBuilder
 from app.retrieval.local_faiss_retriever import LocalFaissRetriever
 from app.schemas.doc import SourceDoc
@@ -49,3 +49,13 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     assert all(
         hit.vector_score is not None and math.isfinite(hit.vector_score) for hit in vector_hits
     )
+
+
+def test_embedding_text_excludes_system_identity() -> None:
+    doc = SourceDoc(
+        doc_id="doc-1",
+        system_id="private_album_backend",
+        summary="去年在京都看到的红色寺庙",
+        keywords=["京都", "红色寺庙"],
+    )
+    assert "private_album_backend" not in build_embedding_text(doc)

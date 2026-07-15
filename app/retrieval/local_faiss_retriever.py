@@ -27,7 +27,7 @@ class LocalFaissRetriever:
         if self.embedding_service is None:
             self.embedding_service = get_embedding_service()
 
-    async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
+    async def search(self, query: str, top_k: int = 20) -> list[SearchHit]:
         self._ensure_loaded()
         assert self._index is not None
         assert self._doc_ids is not None

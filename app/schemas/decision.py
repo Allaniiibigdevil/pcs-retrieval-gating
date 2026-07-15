@@ -1,11 +1,13 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DecideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     task_id: str | None = None
-    task: str
-    top_k_docs: int = 50
-    max_systems: int = 5
+    task: str = Field(min_length=1)
+    top_k_docs: int = Field(default=20, ge=1, le=1000)
+    max_systems: int = Field(default=5, ge=0)
 
 
 class EvidenceDoc(BaseModel):
@@ -18,12 +20,16 @@ class EvidenceDoc(BaseModel):
     vector_score: float | None = None
     bm25_rank: int | None = None
     vector_rank: int | None = None
+    gating_score: float | None = None
 
 
 class SystemDecision(BaseModel):
     system_id: str
     selected: bool
     confidence: float
+    confidence_kind: str = "heuristic"
+    threshold: float
+    trigger_doc_id: str | None = None
     evidence_docs: list[EvidenceDoc]
 
 

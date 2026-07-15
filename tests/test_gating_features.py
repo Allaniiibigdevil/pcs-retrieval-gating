@@ -2,68 +2,88 @@ import json
 
 import numpy as np
 
-from app.decision.gating_features import append_gating_feature_rows, build_gating_feature_rows
+from app.decision.gating_features import (
+    FEATURE_NAMES,
+    append_gating_feature_rows,
+    build_gating_feature_rows,
+    rows_to_mil_bags,
+    select_representative_docs,
+)
 from app.ml.logistic_regression import train_logistic_regression
 from app.schemas.search import SearchHit
 
 
-def test_build_gating_feature_rows_extracts_system_level_features(tmp_path) -> None:
+def _nine_representative_candidates() -> list[SearchHit]:
     docs = [
-        SearchHit(
-            doc_id="shared",
-            system_id="memo",
-            vector_score=0.8,
-            vector_rank=2,
-            bm25_score=10,
-            bm25_rank=1,
-        ),
-        SearchHit(doc_id="v", system_id="memo", vector_score=0.6, vector_rank=3),
-        SearchHit(doc_id="e", system_id="album", bm25_score=5, bm25_rank=2),
+        SearchHit(doc_id=f"e{i}", system_id="memo", bm25_score=11 - i, bm25_rank=i)
+        for i in range(1, 5)
     ]
-
-    rows = build_gating_feature_rows(
-        "query", docs, task_id="t1", all_system_ids={"memo", "album", "calendar"}
+    docs.extend(
+        SearchHit(doc_id=f"v{i}", system_id="memo", vector_score=1 - i / 10, vector_rank=i)
+        for i in range(1, 5)
     )
-    by_system = {row.system_id: row for row in rows}
+    docs.extend(
+        SearchHit(
+            doc_id=f"j{i}",
+            system_id="memo",
+            bm25_score=7 - i,
+            bm25_rank=i + 3,
+            vector_score=0.7 - i / 10,
+            vector_rank=i + 3,
+        )
+        for i in range(1, 5)
+    )
+    return docs
 
-    assert by_system["memo"].vector_top1 == 0.8
-    assert by_system["memo"].vector_top3_mean == 0.7
-    assert by_system["memo"].vector_best_rank_score == 0.5
-    assert by_system["memo"].vector_hit_count == 2.0
-    assert by_system["memo"].es_top1_norm == 1.0
-    assert by_system["memo"].es_best_rank_score == 1.0
-    assert by_system["memo"].es_hit_count == 1.0
-    assert by_system["memo"].same_doc_hit_by_both == 1.0
-    assert by_system["memo"].same_system_hit_by_both == 1.0
-    assert by_system["album"].es_top1_norm == 0.5
-    assert by_system["calendar"].vector_top1 == 0.0
-    assert by_system["calendar"].vector_hit_count == 0.0
-    assert by_system["calendar"].es_top1_norm == 0.0
-    assert by_system["calendar"].es_hit_count == 0.0
+
+def test_selects_es_vector_and_rrf_top3_then_deduplicates() -> None:
+    representatives = select_representative_docs(_nine_representative_candidates())
+
+    assert {doc.doc_id for doc in representatives} == {
+        "e1",
+        "e2",
+        "e3",
+        "v1",
+        "v2",
+        "v3",
+        "j1",
+        "j2",
+        "j3",
+    }
+
+
+def test_feature_rows_form_one_nine_element_mil_bag(tmp_path) -> None:
+    rows = build_gating_feature_rows(
+        "query",
+        _nine_representative_candidates(),
+        task_id="t1",
+        labels_by_system={"memo": 1},
+    )
+    bags = rows_to_mil_bags(rows)
+
+    assert len(rows) == 9
+    assert bags[0].features.shape == (9, len(FEATURE_NAMES))
+    assert bags[0].label == 1.0
+    forbidden = ("source", "system", "capability", "cost", "latency", "count")
+    assert all(
+        not any(token in feature_name for token in forbidden) for feature_name in FEATURE_NAMES
+    )
 
     output = tmp_path / "samples.jsonl"
     append_gating_feature_rows(rows, output)
     payload = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
-    assert payload["query"] == "query"
-    assert payload["label"] is None
+    assert payload["doc_id"]
+    assert payload["label"] == 1
 
 
-def test_logistic_regression_training_learns_simple_boundary() -> None:
-    features = np.array(
-        [
-            [1, 1, 1, 3, 1, 1, 1, 2, 1, 1],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0.9, 0.8, 1, 2, 0.8, 0.7, 1, 1, 1, 1],
-            [0.1, 0.1, 0, 1, 0.1, 0.1, 0, 1, 0, 0],
-        ],
-        dtype=float,
-    )
+def test_logistic_regression_remains_a_document_baseline() -> None:
+    positive = np.ones(len(FEATURE_NAMES), dtype=float)
+    negative = np.zeros(len(FEATURE_NAMES), dtype=float)
+    features = np.stack([positive, negative, positive * 0.9, negative + 0.1])
     labels = np.array([1, 0, 1, 0], dtype=float)
-
     model = train_logistic_regression(
         features, labels, learning_rate=0.05, epochs=300, batch_size=2, seed=7
     )
-    probs = model.predict_proba(features)
-
-    assert probs[0] > 0.8
-    assert probs[1] < 0.3
+    probabilities = model.predict_proba(features)
+    assert probabilities[0] > 0.8
+    assert probabilities[1] < 0.3

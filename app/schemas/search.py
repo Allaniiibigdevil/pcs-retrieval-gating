@@ -20,7 +20,7 @@ class SearchHit(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    top_k: int = 50
+    top_k: int = 20
 
 
 class SearchResponse(BaseModel):

@@ -15,7 +15,7 @@ class LocalElasticsearchRetriever:
             f"keywords^{settings.LOCAL_ES_KEYWORDS_BOOST}",
         ]
 
-    async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
+    async def search(self, query: str, top_k: int = 20) -> list[SearchHit]:
         if not query.strip():
             return []
 

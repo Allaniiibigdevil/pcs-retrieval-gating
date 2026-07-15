@@ -7,8 +7,7 @@ from app.schemas.search import SearchHit
 
 
 class Retriever(Protocol):
-    async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
-        ...
+    async def search(self, query: str, top_k: int = 20) -> list[SearchHit]: ...
 
 
 @lru_cache

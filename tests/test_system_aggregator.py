@@ -1,4 +1,8 @@
+import numpy as np
+
+from app.decision.gating_features import FEATURE_NAMES
 from app.decision.system_aggregator import SystemAggregator
+from app.ml.mil_mlp import MilMlpGatingModel
 from app.schemas.search import SearchHit
 
 
@@ -146,3 +150,50 @@ def test_system_aggregator_exposes_doc_keywords_and_es_highlight() -> None:
         "summary": ["记录了用户对<em>海鲜</em>过敏"],
         "keywords": ["<em>海鲜过敏</em>"],
     }
+
+
+def test_max_systems_does_not_drop_sources_above_threshold() -> None:
+    aggregator = SystemAggregator(selection_threshold=0.5)
+    decisions = aggregator.aggregate(
+        [
+            hit("a", "source_a", vector_score=0.9),
+            hit("b", "source_b", vector_score=0.8),
+            hit("c", "source_c", vector_score=0.7),
+        ],
+        max_systems=1,
+    )
+    assert len(decisions) == 3
+    assert all(decision.selected for decision in decisions)
+
+
+def test_mil_mlp_uses_the_strongest_representative_document() -> None:
+    input_weights = np.zeros((1, len(FEATURE_NAMES)), dtype=float)
+    input_weights[0, FEATURE_NAMES.index("vector_score_norm")] = 1.0
+    model = MilMlpGatingModel(
+        input_weights=input_weights,
+        input_bias=np.zeros(1, dtype=float),
+        output_weights=np.array([10.0]),
+        output_bias=-5.0,
+        feature_names=list(FEATURE_NAMES),
+    )
+    aggregator = SystemAggregator(
+        scorer="mil_mlp",
+        model=model,
+        selection_threshold=0.8,
+        require_calibration=False,
+    )
+
+    decisions = aggregator.aggregate(
+        [
+            hit("memo-weak", "memo", vector_score=0.2),
+            hit("memo-strong", "memo", vector_score=0.9),
+            hit("album-medium", "album", vector_score=0.4),
+        ],
+        query_text="query",
+    )
+
+    by_system = {decision.system_id: decision for decision in decisions}
+    assert by_system["memo"].selected is True
+    assert by_system["memo"].trigger_doc_id == "memo-strong"
+    assert by_system["memo"].confidence > 0.98
+    assert by_system["album"].selected is False

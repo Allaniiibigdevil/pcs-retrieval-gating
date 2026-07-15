@@ -8,11 +8,9 @@ from app.schemas.doc import SourceDoc
 
 
 class EmbeddingService(Protocol):
-    async def embed(self, text: str) -> list[float]:
-        ...
+    async def embed(self, text: str) -> list[float]: ...
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        ...
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
 
 
 class MockEmbeddingService:
@@ -62,7 +60,10 @@ class BGEEmbeddingService:
 
 def build_embedding_text(doc: SourceDoc) -> str:
     keywords = ", ".join(doc.keywords)
-    return f"system: {doc.system_id}\nsummary: {doc.summary}\nkeywords: {keywords}"
+    parts = [f"summary: {doc.summary}"]
+    if keywords:
+        parts.append(f"keywords: {keywords}")
+    return "\n".join(parts)
 
 
 def get_embedding_service() -> EmbeddingService:

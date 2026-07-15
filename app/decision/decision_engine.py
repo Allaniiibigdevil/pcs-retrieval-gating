@@ -6,7 +6,6 @@ from app.decision.query_normalizer import QueryNormalizer
 from app.decision.gating_features import (
     append_gating_feature_rows,
     build_gating_feature_rows,
-    load_local_system_ids,
 )
 from app.decision.system_aggregator import SystemAggregator
 from app.retrieval.candidate_merger import CandidateMerger
@@ -39,7 +38,7 @@ class DecisionEngine:
         self,
         task: str,
         task_id: str | None = None,
-        top_k_docs: int = 50,
+        top_k_docs: int = 20,
         max_systems: int = 5,
     ) -> DecideResponse:
         timer = StageTimer()
@@ -74,16 +73,13 @@ class DecisionEngine:
         timer.mark("merge")
         evidence_docs = self.evidence_builder.build(task, candidates)
         settings = get_settings()
-        all_system_ids = None
-        if settings.GATING_INCLUDE_UNRECALLED_SYSTEMS:
-            all_system_ids = set(load_local_system_ids())
-        feature_rows = build_gating_feature_rows(
-            task, evidence_docs, task_id=task_id, all_system_ids=all_system_ids
-        )
+        feature_rows = build_gating_feature_rows(task, evidence_docs, task_id=task_id)
         if settings.GATING_FEATURE_LOG_ENABLED:
             append_gating_feature_rows(feature_rows)
 
-        decisions = self.aggregator.aggregate(evidence_docs, max_systems)
+        decisions = self.aggregator.aggregate(
+            evidence_docs, max_systems=max_systems, query_text=task
+        )
         selected_systems = [item.system_id for item in decisions if item.selected]
         timer.mark("aggregate")
         latency_ms = timer.finish()

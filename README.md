@@ -1,13 +1,16 @@
 # Retrieval Gating Service
 
-这是一个本地优先的检索门控原型服务。它的目标不是给文档做最终排序，而是根据当前用户任务判断应该检索哪些子系统。
+这是一个本地优先的个人内容检索门控原型。它只根据各数据源上报的内容判断哪些 system 可能相关，不使用 system 类型、能力、成本或延迟进行路由。
 
 ```text
 用户任务
   -> ES / FAISS 找到相关文档证据
-  -> 聚合到 system_id
+  -> 每个 system 选择 ES Top-3 / FAISS Top-3 / RRF Top-3
+  -> 文档 MLP + max-MIL
   -> 输出 selected_systems
 ```
+
+`doc_id` 在全部 systems 中全局唯一；同一文档进入 ES 和 FAISS 时使用同一个 `doc_id`。`system_id` 只用于分组、阈值和输出，不进入 embedding 或 MLP 特征。
 
 当前分支只维护本地模式：使用本地 Elasticsearch 做词法检索，使用本地 FAISS 做向量检索，不实现远端 Elasticsearch 和 GaussDB 路径。
 
@@ -90,10 +93,15 @@ LOCAL_ES_SEARCH_ANALYZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
 SYSTEM_SELECTION_THRESHOLD=0.60
+SOURCE_SELECTION_THRESHOLDS={}
 ES_SCORE_WEIGHT=0.55
 AGREEMENT_WEIGHT=0.20
 SEMANTIC_MATCH_THRESHOLD=0.30
 LEXICAL_MATCH_THRESHOLD=0.30
+
+GATING_SCORER=fixed
+GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.json
+GATING_REQUIRE_CALIBRATION=true
 ```
 
 ## 查询处理
@@ -144,6 +152,8 @@ doc_strength = clamp(
 - `AGREEMENT_WEIGHT`：一致性奖励的系数。
 - 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
 - `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
+
+生产学习路径使用九元素 Max-MIL。每个 system 从候选并集中分别取 ES Top-3、FAISS Top-3 和 RRF Top-3，按全局唯一 `doc_id` 去重后得到 1～9 篇代表文档。共享小型 MLP 分别打分，system 分数取最大值；RRF 仅用于代表文档选择和特征，不直接作为阈值。模型在按 query 隔离的留出集上做单调 Platt 校准。
 
 ## 离线灌入和建索引
 
@@ -230,7 +240,7 @@ curl -X POST http://127.0.0.1:8000/v1/search/vector ^
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/decide ^
   -H "Content-Type: application/json" ^
-  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50,\"max_systems\":5}"
+  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":20,\"max_systems\":5}"
 ```
 
 返回示例：
@@ -245,6 +255,9 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
       "system_id": "notepad",
       "selected": true,
       "confidence": 0.84,
+      "confidence_kind": "calibrated_probability",
+      "threshold": 0.6,
+      "trigger_doc_id": "3",
       "evidence_docs": [
         {
           "doc_id": "3",
@@ -258,7 +271,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
           "bm25_score": 1.2,
           "vector_score": 0.84,
           "bm25_rank": 1,
-          "vector_rank": 1
+          "vector_rank": 1,
+          "gating_score": 0.84
         }
       ]
     }
@@ -273,6 +287,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 - `decisions`：候选子系统的解释信息，用于调试和观察。
 - `selected`：该候选系统是否进入 `selected_systems`。
 - `confidence`：该系统最强证据文档的强度分。
+- `threshold`：该 system 实际使用的选择阈值，可由 `SOURCE_SELECTION_THRESHOLDS` 覆盖全局阈值。
+- `trigger_doc_id`：经 Max pooling 后触发该 system 的代表文档。
 - `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
 
 ## 测试和检查
@@ -306,43 +322,25 @@ uv run python -m compileall app tests
 - 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
 - 最终输出目标是子系统选择，不是文档排序。
 
-## 逻辑回归门控数据采集与训练
+## 九元素 Max-MIL 数据采集与训练
 
-每次调用 `/v1/decide` 时，服务会按候选 `system_id` 追加写入一行 JSONL 训练样本，默认路径是 `data/gating/training_samples.jsonl`。样本包含原始 `query`、`task_id`、`system_id`、待人工标注的 `label` 以及以下特征：
-
-- `vector_top1`
-- `vector_top3_mean`
-- `vector_best_rank_score`
-- `vector_hit_count`
-- `es_top1_norm`
-- `es_top3_mean`
-- `es_best_rank_score`
-- `es_hit_count`
-- `same_doc_hit_by_both`
-- `same_system_hit_by_both`
-
-人工标注时将 JSONL 中的 `label` 从 `null` 改为 `1`（应选该系统）或 `0`（不应选该系统），然后运行：
+每次调用 `/v1/decide` 时，服务会为九元素代表集合中的每篇文档追加一行 JSONL。对同一个 `(task_id 或 query, system_id)` bag，将所有行的 `label` 统一改为 `1`（至少一篇相关）或 `0`（全部无关），然后运行：
 
 ```bash
 uv run python -m app.offline.train_gating_model \
   --input data/gating/training_samples.jsonl \
-  --output data/gating/logistic_regression_model.json \
+  --output data/gating/nine_representative_mil_mlp.json \
   --batch-size 32
 ```
 
-训练实现使用 PyTorch `nn.Linear` + `BCEWithLogitsLoss`，默认按 mini-batch（`--batch-size 32`）shuffle 训练，并通过 `--seed` 固定随机性；如果样本量很小，实际 batch 会自动裁剪到样本数。
+训练使用共享 MLP，对 bag 内文档 logit 取 max 后与 system label 计算 BCE。对于负 system，额外把所有代表文档作为负例计算辅助 loss。不要把正 system 的全部文档分别标成正例。
 
-训练后如需用逻辑回归替换固定打分，将配置改为：
+训练后将配置改为：
 
 ```env
-GATING_SCORER=logistic_regression
-GATING_MODEL_PATH=data/gating/logistic_regression_model.json
+GATING_SCORER=mil_mlp
+GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.json
+GATING_REQUIRE_CALIBRATION=true
 ```
 
-保留 `GATING_SCORER=fixed` 时，系统继续使用原有固定规则打分，但仍会写出训练样本；可用 `GATING_FEATURE_LOG_ENABLED=false` 关闭样本采集。
-
-未召回的系统也会作为样本写入。默认 `GATING_INCLUDE_UNRECALLED_SYSTEMS=true` 时，服务会从本地索引 artifact 中读取完整 `system_id` 集合；没有被 ES 或向量检索召回的系统会以全 0 特征写入 JSONL，方便人工标注为负样本。这样训练集既包含被召回候选的排序/强度学习样本，也包含“完全没命中时不该选”的负样本。
-
-`vector_hit_count` 和 `es_hit_count` 是当前 query 下单个系统分别被向量检索和 ES 检索命中的候选文档数。ES 在没有词法匹配、检索异常或 top-k 截断时可以为 0；vector 在索引非空且检索正常时通常会返回全局 top-k，但按 system_id 聚合后，某个具体系统仍可能为 0。
-
-`top_k_docs` 会影响训练样本：如果某个系统没有进入 ES 或 vector 的 top-k，它在样本中会表现为未召回或只被一路召回。通常 top10 之后的单条文档很难靠固定规则直接入选，但仍可能影响 `top3_mean`、双路命中等聚合特征。实际建议是线上采集阶段先保持一个略大的 top-k（例如 30-50）以避免早期漏采弱正例；标注和训练稳定后，再根据召回覆盖率、正例在 rank 分布中的位置、延迟和模型效果下调 top-k。
+`fixed` 仅用于冷启动。未进入 ES/FAISS 候选并集的 system 不会伪造全零样本；这类漏召回应由 Candidate Source Recall@K 单独评估。
