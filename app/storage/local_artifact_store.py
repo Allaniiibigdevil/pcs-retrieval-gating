@@ -38,7 +38,9 @@ class LocalArtifactStore:
                 try:
                     docs.append(SourceDoc.model_validate_json(line))
                 except Exception as exc:
-                    raise ValueError(f"Invalid docs artifact at {self.docs_path}:{line_no}") from exc
+                    raise ValueError(
+                        f"Invalid docs artifact at {self.docs_path}:{line_no}"
+                    ) from exc
         return docs
 
     def save_faiss(self, index: Any, doc_ids: list[str]) -> None:
@@ -71,8 +73,3 @@ class LocalArtifactStore:
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-
-    def load_manifest(self) -> dict[str, Any]:
-        if not self.manifest_path.exists():
-            raise FileNotFoundError(f"Missing manifest artifact: {self.manifest_path}")
-        return json.loads(self.manifest_path.read_text(encoding="utf-8"))

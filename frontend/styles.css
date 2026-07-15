@@ -33,6 +33,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -285,7 +286,8 @@ h2 {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -301,7 +303,8 @@ textarea {
 }
 
 textarea:focus,
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(199, 0, 11, 0.1);
 }
@@ -547,6 +550,11 @@ input:focus {
   color: var(--ink);
   font-size: 13px;
   font-weight: 900;
+}
+
+.field-row input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
 }
 
 .field-row p,

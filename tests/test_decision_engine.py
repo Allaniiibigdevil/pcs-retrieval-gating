@@ -9,7 +9,7 @@ class FakeRetriever:
     def __init__(self, hits: list[SearchHit]) -> None:
         self.hits = hits
 
-    async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
+    async def search(self, query: str, top_k: int = 20) -> list[SearchHit]:
         del query, top_k
         return self.hits
 

@@ -1,6 +1,6 @@
 import json
 
-import numpy as np
+import pytest
 
 from app.decision.gating_features import (
     FEATURE_NAMES,
@@ -9,7 +9,6 @@ from app.decision.gating_features import (
     rows_to_mil_bags,
     select_representative_docs,
 )
-from app.ml.logistic_regression import train_logistic_regression
 from app.schemas.search import SearchHit
 
 
@@ -76,14 +75,13 @@ def test_feature_rows_form_one_nine_element_mil_bag(tmp_path) -> None:
     assert payload["label"] == 1
 
 
-def test_logistic_regression_remains_a_document_baseline() -> None:
-    positive = np.ones(len(FEATURE_NAMES), dtype=float)
-    negative = np.zeros(len(FEATURE_NAMES), dtype=float)
-    features = np.stack([positive, negative, positive * 0.9, negative + 0.1])
-    labels = np.array([1, 0, 1, 0], dtype=float)
-    model = train_logistic_regression(
-        features, labels, learning_rate=0.05, epochs=300, batch_size=2, seed=7
+def test_mil_bag_rejects_duplicate_documents() -> None:
+    rows = build_gating_feature_rows(
+        "query",
+        _nine_representative_candidates(),
+        task_id="t1",
+        labels_by_system={"memo": 1},
     )
-    probabilities = model.predict_proba(features)
-    assert probabilities[0] > 0.8
-    assert probabilities[1] < 0.3
+
+    with pytest.raises(ValueError, match="duplicate doc_id"):
+        rows_to_mil_bags([*rows, rows[0]])

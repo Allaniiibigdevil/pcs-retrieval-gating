@@ -101,8 +101,8 @@
         <section class="view" id="view-settings">
           <header class="page-header">
             <div>
-              <p class="eyebrow">Scoring Reference</p>
-              <h1>评分配置说明</h1>
+              <p class="eyebrow">Gating Reference</p>
+              <h1>九元素 Max-MIL 配置说明</h1>
             </div>
             <button class="secondary-button" id="copyEnvButton" type="button">复制 .env 片段</button>
           </header>
@@ -127,21 +127,21 @@
                 <p>默认值：当前页面 origin。通过 FastAPI 静态页面访问时通常不用改。</p>
               </div>
               <div class="field-row">
-                <label for="topKInput">DEFAULT_TOP_K_DOCS</label>
-                <input id="topKInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：50。每次决策最多保留多少个候选文档。更大通常召回更充分，但也可能引入更多噪声。</p>
+                <label for="topKInput">top_k_docs</label>
+                <input id="topKInput" type="number" min="1" max="1000" step="1" />
+                <p>请求字段，默认值：20。ES 和 FAISS 各自召回的候选文档上限。</p>
               </div>
               <div class="field-row">
-                <label for="maxSystemsInput">DEFAULT_MAX_SYSTEMS</label>
-                <input id="maxSystemsInput" type="number" min="1" max="20" step="1" />
-                <p>默认值：5。最多返回多少个候选系统。它控制展示数量，不代表这些系统都会被选中。</p>
+                <label for="maxSystemsInput">max_systems</label>
+                <input id="maxSystemsInput" type="number" min="0" max="1000" step="1" />
+                <p>请求字段，默认值：5。只限制返回的未选中诊断项；所有超过阈值的 system 都会保留。</p>
               </div>
             </section>
 
             <section class="settings-card">
               <div class="section-title">
-                <span class="step">权重</span>
-                <h2>系统选择</h2>
+                <span class="step">模型</span>
+                <h2>系统选择与权重文件</h2>
               </div>
               <div class="field-row">
                 <label for="thresholdInput">SYSTEM_SELECTION_THRESHOLD</label>
@@ -149,58 +149,55 @@
                 <p>默认值：0.60。系统 confidence 大于等于这个阈值时，进入最终的 selected_systems。</p>
               </div>
               <div class="field-row">
-                <label for="esWeightInput">ES_SCORE_WEIGHT</label>
-                <input id="esWeightInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.55。限制 ES 单路归一化第一名的最高基础贡献。</p>
+                <label for="scorerInput">GATING_SCORER</label>
+                <select id="scorerInput">
+                  <option value="fixed">fixed（冷启动）</option>
+                  <option value="mil_mlp">mil_mlp（正式模型）</option>
+                </select>
+                <p>完成训练后使用 mil_mlp；没有权重文件时才使用 fixed 采集首批样本。</p>
               </div>
               <div class="field-row">
-                <label for="agreementWeightInput">AGREEMENT_WEIGHT</label>
-                <input id="agreementWeightInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.20。双路过线时，几何平均一致性奖励的系数。</p>
+                <label for="modelPathInput">GATING_MODEL_PATH</label>
+                <input id="modelPathInput" type="text" />
+                <p>NPZ 二进制权重路径，包含 MLP 参数、特征 schema 和校准参数。</p>
               </div>
               <div class="field-row">
-                <label for="semanticThresholdInput">SEMANTIC_MATCH_THRESHOLD</label>
-                <input id="semanticThresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.30。触发一致性奖励所需的最低语义分。</p>
-              </div>
-              <div class="field-row">
-                <label for="lexicalThresholdInput">LEXICAL_MATCH_THRESHOLD</label>
-                <input id="lexicalThresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.30。触发一致性奖励所需的最低 ES query 内归一化分。</p>
+                <label for="requireCalibrationInput">GATING_REQUIRE_CALIBRATION</label>
+                <input id="requireCalibrationInput" type="checkbox" />
+                <p>开启后，未在 query 留出集上完成校准的模型会被拒绝加载。</p>
               </div>
             </section>
 
             <section class="formula-card">
               <div class="section-title">
                 <span class="step">公式</span>
-                <h2>当前 MVP 评分逻辑</h2>
+                <h2>正式模型决策逻辑</h2>
               </div>
               <div class="formula-flow">
                 <div>
-                  <strong>1. 分数归一化</strong>
-                  <code>vector_score_norm = clamp(vector_score, 0, 1)</code>
-                  <code>bm25_score_norm = bm25_score / max_bm25_score_in_candidates</code>
+                  <strong>1. 全局候选</strong>
+                  <code>candidates = union(ES Top-20, FAISS Top-20)</code>
                 </div>
                 <div>
-                  <strong>2. 基础分</strong>
-                  <code>base = max(vector_score_norm, ES_SCORE_WEIGHT * es_score_norm)</code>
+                  <strong>2. 九元素代表集合</strong>
+                  <code>bag(system) = dedupe(ES Top-3 + FAISS Top-3 + RRF Top-3)</code>
                 </div>
                 <div>
-                  <strong>3. 一致性奖励</strong>
-                  <code>agreement = AGREEMENT_WEIGHT * sqrt(vector_score_norm * es_score_norm)，仅在双路均达到最低门槛时生效</code>
+                  <strong>3. 内容证据特征</strong>
+                  <code>vector / ES 分数与 rank、RRF、双路命中、关键词匹配比例</code>
                 </div>
                 <div>
-                  <strong>4. 单文档强度</strong>
-                  <code>doc_strength = clamp(base + agreement, 0, 1)</code>
+                  <strong>4. 共享 MLP + Max pooling</strong>
+                  <code>system_logit = max(MLP(doc_features) for doc in bag)</code>
                 </div>
                 <div>
-                  <strong>5. 系统选择</strong>
-                  <code>system_confidence = max(doc_strength of docs in this system)</code>
-                  <code>selected = system_confidence >= SYSTEM_SELECTION_THRESHOLD</code>
+                  <strong>5. 校准与系统选择</strong>
+                  <code>confidence = calibrated_sigmoid(system_logit)</code>
+                  <code>selected = confidence &gt;= system_threshold</code>
                 </div>
               </div>
               <div class="formula-note">
-                <p><strong>核心含义：</strong>文档只是证据，最终输出的是 system_id。系统 confidence 使用该系统下最强的一条文档证据，不做多文档求和。</p>
+                <p><strong>核心含义：</strong>MLP 只读取内容证据特征；system_id 仅负责分 bag、查阈值和输出，不进入模型。</p>
               </div>
             </section>
 

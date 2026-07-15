@@ -43,6 +43,7 @@ app/
   api/            FastAPI 路由
   decision/       query 处理、证据增强、系统聚合、决策引擎
   embedding/      mock embedding 和 BGE embedding
+  ml/             九元素 Max-MIL MLP 的训练、推理和 NPZ 权重读写
   offline/        本地离线灌入和索引构建命令
   retrieval/      本地 ES、本地 FAISS、候选合并、retriever factory
   schemas/        Pydantic 请求 / 响应模型
@@ -80,7 +81,6 @@ uv sync --extra dev
 `.env.example` 中包含主要配置：
 
 ```env
-APP_MODE=local
 EMBEDDING_PROVIDER=bge
 EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
 EMBEDDING_DIM=512
@@ -90,17 +90,16 @@ LOCAL_ES_URL=http://127.0.0.1:9200
 LOCAL_ES_INDEX=pcs_retrieval_docs
 LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
-LOCAL_ES_INDEX_ON_BUILD=false
 
 SYSTEM_SELECTION_THRESHOLD=0.60
-SOURCE_SELECTION_THRESHOLDS={}
+SYSTEM_SELECTION_THRESHOLDS={}
 ES_SCORE_WEIGHT=0.55
 AGREEMENT_WEIGHT=0.20
 SEMANTIC_MATCH_THRESHOLD=0.30
 LEXICAL_MATCH_THRESHOLD=0.30
 
 GATING_SCORER=fixed
-GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.json
+GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.npz
 GATING_REQUIRE_CALIBRATION=true
 ```
 
@@ -120,7 +119,7 @@ ES 证据匹配由 ES analyzer 决定。修改 ES analyzer 词表后，建议用
 
 ## 评分机制
 
-当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，只在当前 query 的候选集合内归一化：
+服务只保留两个评分模式：`fixed` 用于尚无标注模型时的冷启动，`mil_mlp` 是正式的九元素 Max-MIL 路径。冷启动模式下，ES 词法 `_score` 会暂存到字段 `bm25_score`，只在当前 query 的候选集合内归一化：
 
 ```text
 vector_score_norm = clamp(vector_score, 0, 1)
@@ -153,7 +152,9 @@ doc_strength = clamp(
 - 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
 - `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
 
-生产学习路径使用九元素 Max-MIL。每个 system 从候选并集中分别取 ES Top-3、FAISS Top-3 和 RRF Top-3，按全局唯一 `doc_id` 去重后得到 1～9 篇代表文档。共享小型 MLP 分别打分，system 分数取最大值；RRF 仅用于代表文档选择和特征，不直接作为阈值。模型在按 query 隔离的留出集上做单调 Platt 校准。
+`mil_mlp` 模式下，每个 system 从候选并集中分别取 ES Top-3、FAISS Top-3 和 RRF Top-3，按全局唯一 `doc_id` 去重后得到 1～9 篇代表文档。共享小型 MLP 分别打分，system 分数取最大值；RRF 仅用于代表文档选择和特征，不直接作为阈值。模型在按 query 隔离的留出集上做单调 Platt 校准。
+
+模型权重保存为 NumPy `.npz` 二进制文件，包含 MLP 参数、特征 schema、格式版本和校准参数。加载时固定使用 `allow_pickle=False`，不执行 pickle 对象。训练样本仍使用 JSONL，因为它需要人工查看和填写 bag label，不属于模型权重。
 
 ## 离线灌入和建索引
 
@@ -219,14 +220,6 @@ curl -X POST http://127.0.0.1:8000/v1/search/bm25 ^
   -d "{\"query\":\"我可以吃海鲜吗\",\"top_k\":5}"
 ```
 
-兼容接口：
-
-```text
-/v1/search/es
-```
-
-在 `local` 模式下，`/v1/search/bm25` 和 `/v1/search/es` 都会走本地 ES 词法检索。
-
 向量检索：
 
 ```bash
@@ -287,7 +280,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 - `decisions`：候选子系统的解释信息，用于调试和观察。
 - `selected`：该候选系统是否进入 `selected_systems`。
 - `confidence`：该系统最强证据文档的强度分。
-- `threshold`：该 system 实际使用的选择阈值，可由 `SOURCE_SELECTION_THRESHOLDS` 覆盖全局阈值。
+- `threshold`：该 system 实际使用的选择阈值，可由 `SYSTEM_SELECTION_THRESHOLDS` 覆盖全局阈值。
 - `trigger_doc_id`：经 Max pooling 后触发该 system 的代表文档。
 - `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
 
@@ -319,17 +312,17 @@ uv run python -m compileall app tests
 - 文档更新后需要重新运行离线索引构建。
 - 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
 - 向量检索使用原始 query，不做停用词删除。
-- 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
+- `fixed` 只承担无模型时的冷启动；完成训练和校准后使用 `mil_mlp`。
 - 最终输出目标是子系统选择，不是文档排序。
 
 ## 九元素 Max-MIL 数据采集与训练
 
-每次调用 `/v1/decide` 时，服务会为九元素代表集合中的每篇文档追加一行 JSONL。对同一个 `(task_id 或 query, system_id)` bag，将所有行的 `label` 统一改为 `1`（至少一篇相关）或 `0`（全部无关），然后运行：
+每次调用 `/v1/decide` 时，服务会为九元素代表集合中的每篇文档追加一行 JSONL。`task_id` 应唯一标识一次 query 样本；没有 `task_id` 时才使用 query 文本作为分组键。对同一个 `(task_id 或 query, system_id)` bag，将所有行的 `label` 统一改为 `1`（至少一篇相关）或 `0`（全部无关），然后运行：
 
 ```bash
 uv run python -m app.offline.train_gating_model \
   --input data/gating/training_samples.jsonl \
-  --output data/gating/nine_representative_mil_mlp.json \
+  --output data/gating/nine_representative_mil_mlp.npz \
   --batch-size 32
 ```
 
@@ -339,7 +332,7 @@ uv run python -m app.offline.train_gating_model \
 
 ```env
 GATING_SCORER=mil_mlp
-GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.json
+GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.npz
 GATING_REQUIRE_CALIBRATION=true
 ```
 

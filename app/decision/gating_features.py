@@ -13,6 +13,8 @@ from app.schemas.search import SearchHit
 
 
 RRF_K = 60
+TOP_DOCS_PER_RANKER = 3
+MAX_REPRESENTATIVE_DOCS = TOP_DOCS_PER_RANKER * 3
 
 FEATURE_NAMES = [
     "vector_score_norm",
@@ -97,9 +99,9 @@ def select_representative_docs(evidence_docs: list[SearchHit]) -> list[SearchHit
     for system_id in sorted(grouped):
         docs = grouped[system_id]
         selected = [
-            *_top_by_rank(docs, "bm25_rank", "bm25_score"),
-            *_top_by_rank(docs, "vector_rank", "vector_score"),
-            *sorted(docs, key=_rrf_raw, reverse=True)[:3],
+            *_top_by_rank(docs, "bm25_rank", "bm25_score", TOP_DOCS_PER_RANKER),
+            *_top_by_rank(docs, "vector_rank", "vector_score", TOP_DOCS_PER_RANKER),
+            *sorted(docs, key=_rrf_raw, reverse=True)[:TOP_DOCS_PER_RANKER],
         ]
         seen_doc_ids: set[str] = set()
         for doc in selected:
@@ -176,16 +178,6 @@ def append_gating_feature_rows(
             file.write(row.to_json() + "\n")
 
 
-def rows_to_numpy(rows: list[GatingFeatureRow]) -> tuple[np.ndarray, np.ndarray]:
-    labeled = [row for row in rows if row.label is not None]
-    if not labeled:
-        raise ValueError("no labeled rows found")
-    return (
-        np.asarray([row.feature_vector() for row in labeled], dtype=np.float64),
-        np.asarray([int(row.label) for row in labeled], dtype=np.float64),
-    )
-
-
 def rows_to_mil_bags(rows: list[GatingFeatureRow]) -> list[MilBag]:
     grouped: dict[tuple[str, str], list[GatingFeatureRow]] = defaultdict(list)
     for row in rows:
@@ -199,11 +191,23 @@ def rows_to_mil_bags(rows: list[GatingFeatureRow]) -> list[MilBag]:
             raise ValueError(
                 f"inconsistent labels in MIL bag query={query_key!r} system={system_id!r}"
             )
+        if not labels <= {0, 1}:
+            raise ValueError("MIL bag labels must be 0 or 1")
+        doc_ids = [row.doc_id for row in bag_rows]
+        if len(set(doc_ids)) != len(doc_ids):
+            raise ValueError(
+                f"duplicate doc_id in MIL bag query={query_key!r} system={system_id!r}"
+            )
+        if len(bag_rows) > MAX_REPRESENTATIVE_DOCS:
+            raise ValueError(
+                f"MIL bag exceeds {MAX_REPRESENTATIVE_DOCS} documents "
+                f"query={query_key!r} system={system_id!r}"
+            )
         bags.append(
             MilBag(
                 query_key=query_key,
                 system_id=system_id,
-                features=np.asarray([row.feature_vector() for row in bag_rows], dtype=np.float64),
+                features=np.asarray([row.feature_vector() for row in bag_rows], dtype=np.float32),
                 label=float(labels.pop()),
             )
         )

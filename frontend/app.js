@@ -1,12 +1,11 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
-  topKDocs: 50,
+  topKDocs: 20,
   maxSystems: 5,
   threshold: 0.6,
-  esWeight: 0.55,
-  agreementWeight: 0.2,
-  semanticThreshold: 0.3,
-  lexicalThreshold: 0.3,
+  scorer: "fixed",
+  modelPath: "data/gating/nine_representative_mil_mlp.npz",
+  requireCalibration: true,
 };
 
 const state = {
@@ -26,7 +25,7 @@ const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v4") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v5") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -34,7 +33,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v4", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v5", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -136,7 +135,7 @@ function renderDecision(data) {
   selectedSummary.textContent = selected.length ? `选中：${selected.join(", ")}` : "未选中系统";
   selectedSummary.classList.toggle("has-selection", selected.length > 0);
 
-  const totalMs = Object.values(data.latency_ms || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  const totalMs = Number(data.latency_ms?.total || 0);
   latencyText.textContent = totalMs ? `${totalMs.toFixed(1)} ms` : "-";
 
   if (!data.decisions?.length) {
@@ -159,7 +158,7 @@ function renderDecision(data) {
               <div class="keyword-list">
                 ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
               </div>
-              <div class="doc-meta">BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)}</div>
+              <div class="doc-meta">BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)} / Gating ${formatNumber(doc.gating_score)}</div>
             </article>
           `,
         )
@@ -175,8 +174,9 @@ function renderDecision(data) {
             <div class="meter"><span style="width:${width}%"></span></div>
             <div class="score-line">
               <strong>${formatNumber(item.confidence)}</strong>
-              <span>confidence</span>
+              <span>${escapeHtml(item.confidence_kind || "confidence")}</span>
             </div>
+            <div class="doc-meta">threshold ${formatNumber(item.threshold)} / trigger ${escapeHtml(item.trigger_doc_id || "-")}</div>
           </div>
           <div class="evidence">
             <strong>证据</strong>
@@ -245,10 +245,9 @@ function fillSettingsForm() {
   document.querySelector("#topKInput").value = state.settings.topKDocs;
   document.querySelector("#maxSystemsInput").value = state.settings.maxSystems;
   document.querySelector("#thresholdInput").value = state.settings.threshold;
-  document.querySelector("#esWeightInput").value = state.settings.esWeight;
-  document.querySelector("#agreementWeightInput").value = state.settings.agreementWeight;
-  document.querySelector("#semanticThresholdInput").value = state.settings.semanticThreshold;
-  document.querySelector("#lexicalThresholdInput").value = state.settings.lexicalThreshold;
+  document.querySelector("#scorerInput").value = state.settings.scorer;
+  document.querySelector("#modelPathInput").value = state.settings.modelPath;
+  document.querySelector("#requireCalibrationInput").checked = state.settings.requireCalibration;
   renderEnvPreview();
 }
 
@@ -258,14 +257,9 @@ function readSettingsForm() {
     topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
     maxSystems: Number(document.querySelector("#maxSystemsInput").value || defaultSettings.maxSystems),
     threshold: Number(document.querySelector("#thresholdInput").value || defaultSettings.threshold),
-    esWeight: Number(document.querySelector("#esWeightInput").value || defaultSettings.esWeight),
-    agreementWeight: Number(
-      document.querySelector("#agreementWeightInput").value || defaultSettings.agreementWeight,
-    ),
-    semanticThreshold: Number(
-      document.querySelector("#semanticThresholdInput").value || defaultSettings.semanticThreshold,
-    ),
-    lexicalThreshold: Number(document.querySelector("#lexicalThresholdInput").value || defaultSettings.lexicalThreshold),
+    scorer: document.querySelector("#scorerInput").value,
+    modelPath: document.querySelector("#modelPathInput").value.trim() || defaultSettings.modelPath,
+    requireCalibration: document.querySelector("#requireCalibrationInput").checked,
   };
   saveSettingsDraft();
   renderEnvPreview();
@@ -273,13 +267,10 @@ function readSettingsForm() {
 
 function buildEnvPreview() {
   return [
-    `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
-    `DEFAULT_MAX_SYSTEMS=${state.settings.maxSystems}`,
     `SYSTEM_SELECTION_THRESHOLD=${state.settings.threshold}`,
-    `ES_SCORE_WEIGHT=${state.settings.esWeight}`,
-    `AGREEMENT_WEIGHT=${state.settings.agreementWeight}`,
-    `SEMANTIC_MATCH_THRESHOLD=${state.settings.semanticThreshold}`,
-    `LEXICAL_MATCH_THRESHOLD=${state.settings.lexicalThreshold}`,
+    `GATING_SCORER=${state.settings.scorer}`,
+    `GATING_MODEL_PATH=${state.settings.modelPath}`,
+    `GATING_REQUIRE_CALIBRATION=${state.settings.requireCalibration}`,
   ].join("\n");
 }
 
@@ -359,7 +350,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #esWeightInput, #agreementWeightInput, #semanticThresholdInput, #lexicalThresholdInput",
+    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #scorerInput, #modelPathInput, #requireCalibrationInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

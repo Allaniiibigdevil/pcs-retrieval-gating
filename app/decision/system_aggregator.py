@@ -6,7 +6,6 @@ import numpy as np
 
 from app.config import get_settings
 from app.decision.gating_features import build_gating_feature_rows
-from app.ml.logistic_regression import LogisticRegressionGatingModel
 from app.ml.mil_mlp import MilMlpGatingModel
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
@@ -57,11 +56,11 @@ class SystemAggregator:
         self,
         selection_threshold: float | None = None,
         *,
-        source_thresholds: dict[str, float] | None = None,
+        system_thresholds: dict[str, float] | None = None,
         scorer: str | None = None,
         model_path: str | Path | None = None,
         require_calibration: bool | None = None,
-        model: LogisticRegressionGatingModel | MilMlpGatingModel | None = None,
+        model: MilMlpGatingModel | None = None,
     ) -> None:
         settings = get_settings()
         self.selection_threshold = (
@@ -69,10 +68,12 @@ class SystemAggregator:
             if selection_threshold is None
             else selection_threshold
         )
-        self.source_thresholds = dict(
-            settings.SOURCE_SELECTION_THRESHOLDS if source_thresholds is None else source_thresholds
+        self.system_thresholds = dict(
+            settings.SYSTEM_SELECTION_THRESHOLDS if system_thresholds is None else system_thresholds
         )
         self.scorer = scorer or settings.GATING_SCORER
+        if self.scorer not in {"fixed", "mil_mlp"}:
+            raise ValueError(f"unsupported gating scorer: {self.scorer}")
         self.model_path = Path(model_path or settings.GATING_MODEL_PATH)
         self.require_calibration = (
             settings.GATING_REQUIRE_CALIBRATION
@@ -81,33 +82,19 @@ class SystemAggregator:
         )
         self._model = model
 
-    def _learned_doc_scores(
+    def _mil_doc_scores(
         self, query_text: str, evidence_docs: list[SearchHit]
     ) -> tuple[dict[str, float], str]:
         rows = build_gating_feature_rows(query_text, evidence_docs)
         if not rows:
             return {}, "calibrated_probability"
-        features = np.asarray([row.feature_vector() for row in rows], dtype=np.float64)
-        if self.scorer == "logistic_regression":
-            if self._model is None:
-                self._model = LogisticRegressionGatingModel.load(self.model_path)
-            if not isinstance(self._model, LogisticRegressionGatingModel):
-                raise TypeError("model does not match logistic_regression scorer")
-            probabilities = self._model.predict_proba(features)
-            kind = "uncalibrated_probability"
-        elif self.scorer == "mil_mlp":
-            if self._model is None:
-                self._model = MilMlpGatingModel.load(self.model_path)
-            if not isinstance(self._model, MilMlpGatingModel):
-                raise TypeError("model does not match mil_mlp scorer")
-            if self.require_calibration and not self._model.calibrated:
-                raise RuntimeError("MIL model is not calibrated")
-            probabilities = self._model.predict_proba(features)
-            kind = (
-                "calibrated_probability" if self._model.calibrated else "uncalibrated_probability"
-            )
-        else:
-            raise ValueError(f"unsupported gating scorer: {self.scorer}")
+        features = np.asarray([row.feature_vector() for row in rows], dtype=np.float32)
+        if self._model is None:
+            self._model = MilMlpGatingModel.load(self.model_path)
+        if self.require_calibration and not self._model.calibrated:
+            raise RuntimeError("MIL model is not calibrated")
+        probabilities = self._model.predict_proba(features)
+        kind = "calibrated_probability" if self._model.calibrated else "uncalibrated_probability"
         return (
             {
                 row.doc_id: float(probability)
@@ -134,7 +121,7 @@ class SystemAggregator:
             }
             score_kind = "heuristic"
         else:
-            doc_scores, score_kind = self._learned_doc_scores(query_text, evidence_docs)
+            doc_scores, score_kind = self._mil_doc_scores(query_text, evidence_docs)
 
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():
@@ -142,7 +129,7 @@ class SystemAggregator:
             scored_docs.sort(key=lambda doc: doc_scores[doc.doc_id], reverse=True)
             top_docs = scored_docs[:3]
             confidence = doc_scores[top_docs[0].doc_id] if top_docs else 0.0
-            threshold = self.source_thresholds.get(system_id, self.selection_threshold)
+            threshold = self.system_thresholds.get(system_id, self.selection_threshold)
             decisions.append(
                 SystemDecision(
                     system_id=system_id,

@@ -22,11 +22,6 @@ async def search_bm25(request: SearchRequest) -> SearchResponse:
     return SearchResponse(query=query, hits=hits)
 
 
-@router.post("/es", response_model=SearchResponse)
-async def search_es_alias(request: SearchRequest) -> SearchResponse:
-    return await search_bm25(request)
-
-
 @router.post("/vector", response_model=SearchResponse)
 async def search_vector(request: SearchRequest) -> SearchResponse:
     try:

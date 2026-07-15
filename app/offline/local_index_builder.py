@@ -19,7 +19,6 @@ from app.storage.local_artifact_store import LocalArtifactStore
 class BuildIndexResult:
     doc_count: int
     artifact_dir: str
-    embedding_model: str
     embedding_dim: int
 
 
@@ -28,16 +27,12 @@ class LocalIndexBuilder:
         self,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
-        index_elasticsearch: bool | None = None,
+        index_elasticsearch: bool = False,
     ) -> None:
         self.settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service or get_embedding_service()
-        self.index_elasticsearch = (
-            self.settings.LOCAL_ES_INDEX_ON_BUILD
-            if index_elasticsearch is None
-            else index_elasticsearch
-        )
+        self.index_elasticsearch = index_elasticsearch
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
         if not docs:
@@ -78,6 +73,5 @@ class LocalIndexBuilder:
         return BuildIndexResult(
             doc_count=len(docs),
             artifact_dir=str(self.artifact_store.artifact_dir),
-            embedding_model=self.settings.EMBEDDING_MODEL_PATH,
             embedding_dim=int(embedding_matrix.shape[1]),
         )

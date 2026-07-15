@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,10 +17,7 @@ class Settings(BaseSettings):
     )
 
     APP_NAME: str = "retrieval-gating-service"
-    APP_ENV: str = "local"
-    APP_MODE: str = "local"
 
-    LOCAL_DATA_DIR: str = "data"
     LOCAL_RAW_DOCS_PATH: str = "data/raw/docs.jsonl"
     LOCAL_ARTIFACT_DIR: str = "data/artifacts"
 
@@ -30,7 +28,6 @@ class Settings(BaseSettings):
     LOCAL_ES_SHARDS: int = 1
     LOCAL_ES_REPLICAS: int = 0
     LOCAL_ES_TIMEOUT_SECONDS: int = 10
-    LOCAL_ES_INDEX_ON_BUILD: bool = False
     LOCAL_ES_SUMMARY_BOOST: float = 1.0
     LOCAL_ES_KEYWORDS_BOOST: float = 3.0
 
@@ -38,21 +35,17 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = 512
 
-    DEFAULT_TOP_K_DOCS: int = 20
-    DEFAULT_MAX_SYSTEMS: int = 5
-    VECTOR_TOP_K: int = 20
-
     SYSTEM_SELECTION_THRESHOLD: float = 0.60
-    SOURCE_SELECTION_THRESHOLDS: dict[str, float] = Field(default_factory=dict)
+    SYSTEM_SELECTION_THRESHOLDS: dict[str, float] = Field(default_factory=dict)
     ES_SCORE_WEIGHT: float = 0.55
     AGREEMENT_WEIGHT: float = 0.20
     SEMANTIC_MATCH_THRESHOLD: float = 0.30
     LEXICAL_MATCH_THRESHOLD: float = 0.30
 
-    GATING_SCORER: str = "fixed"
+    GATING_SCORER: Literal["fixed", "mil_mlp"] = "fixed"
     GATING_FEATURE_LOG_ENABLED: bool = True
     GATING_TRAINING_DATA_PATH: str = "data/gating/training_samples.jsonl"
-    GATING_MODEL_PATH: str = "data/gating/nine_representative_mil_mlp.json"
+    GATING_MODEL_PATH: str = "data/gating/nine_representative_mil_mlp.npz"
     GATING_REQUIRE_CALIBRATION: bool = True
 
 

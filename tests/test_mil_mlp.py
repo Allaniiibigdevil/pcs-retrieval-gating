@@ -43,8 +43,14 @@ def test_calibrated_model_round_trips(tmp_path) -> None:
         batch_size=4,
         seed=11,
     )
-    path = tmp_path / "model.json"
+    path = tmp_path / "model.npz"
     model.save(path)
+    assert path.read_bytes().startswith(b"PK")
     loaded = MilMlpGatingModel.load(path)
     assert loaded.calibrated is True
     assert loaded.calibration_scale > 0
+    np.testing.assert_allclose(
+        loaded.predict_proba(bags[0].features),
+        model.predict_proba(bags[0].features),
+        rtol=1e-5,
+    )
