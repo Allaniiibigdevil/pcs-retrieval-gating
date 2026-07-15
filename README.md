@@ -325,7 +325,7 @@ uv run python -m compileall app tests
 实际文件中一行是一个 JSON 对象，例如：
 
 ```jsonl
-{"task_id":"q001","query":"去年京都的红色寺庙","systems":[{"system_id":"album","label":null,"docs":[{"doc_id":"photo_1","summary":"京都旅行时拍摄的红色寺庙","keywords":["京都","寺庙"],"vector_score_norm":0.82,"vector_rank_score":1.0,"es_score_query_norm":0.7,"es_rank_score":0.5,"rrf_score":0.9,"same_doc_hit_by_both":1.0,"matched_keyword_ratio":0.67}]}]}
+{"task_id":"q001","query":"去年京都的红色寺庙","systems":[{"system_id":"album","label":null,"docs":[{"doc_id":"photo_1","summary":"京都旅行时拍摄的红色寺庙","keywords":["京都","寺庙"],"vector_score_norm":0.82,"vector_rank_score":1.0,"es_score_query_norm":0.7,"es_rank_score":0.5,"rrf_score":0.9}]}]}
 ```
 
 采集时 `label` 为 `null`。人工标注时只修改 system 对象上的一次 label：`1` 表示该 system 的内容应被检索，`0` 表示不应检索；训练自动跳过仍为 `null` 的 bag。`summary` 和 `keywords` 只用于标注查看，不进入 MLP 特征。

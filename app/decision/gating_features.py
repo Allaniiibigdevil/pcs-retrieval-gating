@@ -22,8 +22,6 @@ FEATURE_NAMES = [
     "es_score_query_norm",
     "es_rank_score",
     "rrf_score",
-    "same_doc_hit_by_both",
-    "matched_keyword_ratio",
 ]
 
 
@@ -40,8 +38,6 @@ class GatingDoc(_GatingRecord):
     es_score_query_norm: float = Field(ge=0.0, le=1.0)
     es_rank_score: float = Field(ge=0.0, le=1.0)
     rrf_score: float = Field(ge=0.0, le=1.0)
-    same_doc_hit_by_both: float = Field(ge=0.0, le=1.0)
-    matched_keyword_ratio: float = Field(ge=0.0, le=1.0)
 
     def feature_vector(self) -> list[float]:
         return [float(getattr(self, name)) for name in FEATURE_NAMES]
@@ -136,18 +132,6 @@ def select_representative_docs(evidence_docs: list[SearchHit]) -> list[SearchHit
     return representatives
 
 
-def _matched_keyword_ratio(hit: SearchHit) -> float:
-    matched = {
-        str(value).strip().lower()
-        for value in hit.metadata.get("matched_keywords", [])
-        if str(value).strip()
-    }
-    if not matched:
-        return 0.0
-    keywords = {value.strip().lower() for value in hit.keywords if value.strip()}
-    return _clamp(len(matched & keywords) / len(keywords)) if keywords else 1.0
-
-
 def _build_gating_doc(doc: SearchHit, max_es_score: float) -> GatingDoc:
     es_norm = (
         _clamp(float(doc.bm25_score) / max_es_score)
@@ -165,10 +149,6 @@ def _build_gating_doc(doc: SearchHit, max_es_score: float) -> GatingDoc:
         es_score_query_norm=es_norm,
         es_rank_score=_rank_score(doc.bm25_rank),
         rrf_score=_rrf_norm(doc),
-        same_doc_hit_by_both=(
-            1.0 if doc.bm25_rank is not None and doc.vector_rank is not None else 0.0
-        ),
-        matched_keyword_ratio=_matched_keyword_ratio(doc),
     )
 
 

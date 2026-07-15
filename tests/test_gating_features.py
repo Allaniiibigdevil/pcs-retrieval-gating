@@ -97,6 +97,16 @@ def test_one_jsonl_line_contains_a_case_with_system_bags(tmp_path) -> None:
     assert "label" not in payload["systems"][0]["docs"][0]
     assert load_cases(output) == [case]
 
+    assert FEATURE_NAMES == [
+        "vector_score_norm",
+        "vector_rank_score",
+        "es_score_query_norm",
+        "es_rank_score",
+        "rrf_score",
+    ]
+    assert "same_doc_hit_by_both" not in payload["systems"][0]["docs"][0]
+    assert "matched_keyword_ratio" not in payload["systems"][0]["docs"][0]
+
     forbidden = ("source", "system", "capability", "cost", "latency", "count")
     assert all(
         not any(token in feature_name for token in forbidden) for feature_name in FEATURE_NAMES
