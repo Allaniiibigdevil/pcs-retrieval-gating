@@ -84,6 +84,7 @@ uv sync --extra dev
 EMBEDDING_PROVIDER=bge
 EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
 EMBEDDING_DIM=512
+EMBEDDING_QUERY_INSTRUCTION=为这个句子生成表示以用于检索相关文章：
 LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
 LOCAL_ARTIFACT_DIR=data/artifacts
 LOCAL_ES_URL=http://127.0.0.1:9200
@@ -314,7 +315,7 @@ uv run python -m compileall app tests
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
 - 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
-- 向量检索使用原始 query，不做停用词删除。
+- 向量检索只在 query 前添加 BGE 检索指令；文档 embedding 不添加该指令，也不对 query 做停用词删除。
 - `fixed` 只承担无模型时的冷启动；完成训练和校准后使用 `mil_mlp`。
 - 最终输出目标是子系统选择，不是文档排序。
 

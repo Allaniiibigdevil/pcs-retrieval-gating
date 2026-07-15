@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = 512
+    EMBEDDING_QUERY_INSTRUCTION: str = "为这个句子生成表示以用于检索相关文章："
 
     SYSTEM_SELECTION_THRESHOLD: float = 0.60
     SYSTEM_SELECTION_THRESHOLDS: dict[str, float] = Field(default_factory=dict)

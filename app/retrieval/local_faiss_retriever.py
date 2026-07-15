@@ -34,7 +34,7 @@ class LocalFaissRetriever:
         assert self._docs_by_id is not None
         assert self.embedding_service is not None
 
-        query_embedding = await self.embedding_service.embed(query)
+        query_embedding = await self.embedding_service.embed_query(query)
         vector = np.asarray([query_embedding], dtype="float32")
         scores, indices = self._index.search(vector, min(top_k, len(self._doc_ids)))
 

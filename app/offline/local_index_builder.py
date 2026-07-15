@@ -39,7 +39,7 @@ class LocalIndexBuilder:
             raise ValueError("Cannot build local index from an empty document set")
 
         embedding_texts = [build_embedding_text(doc) for doc in docs]
-        embeddings = await self.embedding_service.embed_batch(embedding_texts)
+        embeddings = await self.embedding_service.embed_documents(embedding_texts)
         embedding_matrix = np.asarray(embeddings, dtype="float32")
         if len(embedding_matrix.shape) != 2:
             raise ValueError("Embedding service must return a 2D matrix")
