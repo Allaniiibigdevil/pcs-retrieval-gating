@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     LEXICAL_MATCH_THRESHOLD: float = 0.30
 
     GATING_SCORER: Literal["fixed", "mil_mlp"] = "fixed"
-    GATING_FEATURE_LOG_ENABLED: bool = True
-    GATING_TRAINING_DATA_PATH: str = "data/gating/training_samples.jsonl"
+    GATING_CASE_LOG_ENABLED: bool = True
+    GATING_CASES_PATH: str = "data/gating/training_cases.jsonl"
     GATING_MODEL_PATH: str = "data/gating/nine_representative_mil_mlp.npz"
     GATING_REQUIRE_CALIBRATION: bool = True
 

@@ -99,6 +99,8 @@ SEMANTIC_MATCH_THRESHOLD=0.30
 LEXICAL_MATCH_THRESHOLD=0.30
 
 GATING_SCORER=fixed
+GATING_CASE_LOG_ENABLED=true
+GATING_CASES_PATH=data/gating/training_cases.jsonl
 GATING_MODEL_PATH=data/gating/nine_representative_mil_mlp.npz
 GATING_REQUIRE_CALIBRATION=true
 ```
@@ -154,7 +156,7 @@ doc_strength = clamp(
 
 `mil_mlp` 模式下，每个 system 从候选并集中分别取 ES Top-3、FAISS Top-3 和 RRF Top-3，按全局唯一 `doc_id` 去重后得到 1～9 篇代表文档。共享小型 MLP 分别打分，system 分数取最大值；RRF 仅用于代表文档选择和特征，不直接作为阈值。模型在按 query 隔离的留出集上做单调 Platt 校准。
 
-模型权重保存为 NumPy `.npz` 二进制文件，包含 MLP 参数、特征 schema、格式版本和校准参数。加载时固定使用 `allow_pickle=False`，不执行 pickle 对象。训练样本仍使用 JSONL，因为它需要人工查看和填写 bag label，不属于模型权重。
+模型权重保存为 NumPy `.npz` 二进制文件，包含 MLP 参数、特征 schema、格式版本和校准参数。加载时固定使用 `allow_pickle=False`，不执行 pickle 对象。训练数据使用嵌套 JSONL：一行是一个 query case，case 下每个 system 对象是一个 MIL bag。
 
 ## 离线灌入和建索引
 
@@ -277,6 +279,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 字段含义：
 
 - `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
+- `task_id`：case 的唯一标识；请求未提供时由服务生成并返回。
 - `decisions`：候选子系统的解释信息，用于调试和观察。
 - `selected`：该候选系统是否进入 `selected_systems`。
 - `confidence`：该系统最强证据文档的强度分。
@@ -317,11 +320,28 @@ uv run python -m compileall app tests
 
 ## 九元素 Max-MIL 数据采集与训练
 
-每次调用 `/v1/decide` 时，服务会为九元素代表集合中的每篇文档追加一行 JSONL。`task_id` 应唯一标识一次 query 样本；没有 `task_id` 时才使用 query 文本作为分组键。对同一个 `(task_id 或 query, system_id)` bag，将所有行的 `label` 统一改为 `1`（至少一篇相关）或 `0`（全部无关），然后运行：
+每次调用 `/v1/decide` 时，服务向 `data/gating/training_cases.jsonl` 追加一行完整 case。顶层公共字段是 `task_id` 和 `query`；`systems` 中的每个对象就是一个 bag，`label` 只写一次，`docs` 包含去重后的 1～9 篇代表文档。没有传入 `task_id` 时服务会生成唯一值。
+
+实际文件中一行是一个 JSON 对象，例如：
+
+```jsonl
+{"task_id":"q001","query":"去年京都的红色寺庙","systems":[{"system_id":"album","label":null,"docs":[{"doc_id":"photo_1","summary":"京都旅行时拍摄的红色寺庙","keywords":["京都","寺庙"],"vector_score_norm":0.82,"vector_rank_score":1.0,"es_score_query_norm":0.7,"es_rank_score":0.5,"rrf_score":0.9,"same_doc_hit_by_both":1.0,"matched_keyword_ratio":0.67}]}]}
+```
+
+采集时 `label` 为 `null`。人工标注时只修改 system 对象上的一次 label：`1` 表示该 system 的内容应被检索，`0` 表示不应检索；训练自动跳过仍为 `null` 的 bag。`summary` 和 `keywords` 只用于标注查看，不进入 MLP 特征。
+
+数据校验规则：
+
+- 整个文件中的 `task_id` 不得重复。
+- 同一个 case 中 `system_id` 不得重复。
+- 同一个 bag 中 `doc_id` 不得重复，且必须有 1～9 篇文档。
+- 不使用额外的 `schema_version` 字段。
+
+标注完成后运行：
 
 ```bash
 uv run python -m app.offline.train_gating_model \
-  --input data/gating/training_samples.jsonl \
+  --input data/gating/training_cases.jsonl \
   --output data/gating/nine_representative_mil_mlp.npz \
   --batch-size 32
 ```

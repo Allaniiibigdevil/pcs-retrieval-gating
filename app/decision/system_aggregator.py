@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from app.config import get_settings
-from app.decision.gating_features import build_gating_feature_rows
+from app.decision.gating_features import GatingCase, build_gating_case
 from app.ml.mil_mlp import MilMlpGatingModel
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
@@ -83,12 +83,16 @@ class SystemAggregator:
         self._model = model
 
     def _mil_doc_scores(
-        self, query_text: str, evidence_docs: list[SearchHit]
+        self,
+        query_text: str,
+        evidence_docs: list[SearchHit],
+        gating_case: GatingCase | None,
     ) -> tuple[dict[str, float], str]:
-        rows = build_gating_feature_rows(query_text, evidence_docs)
-        if not rows:
+        case = gating_case or build_gating_case(query_text, evidence_docs, task_id="inference")
+        docs = [doc for system in case.systems for doc in system.docs]
+        if not docs:
             return {}, "calibrated_probability"
-        features = np.asarray([row.feature_vector() for row in rows], dtype=np.float32)
+        features = np.asarray([doc.feature_vector() for doc in docs], dtype=np.float32)
         if self._model is None:
             self._model = MilMlpGatingModel.load(self.model_path)
         if self.require_calibration and not self._model.calibrated:
@@ -97,8 +101,8 @@ class SystemAggregator:
         kind = "calibrated_probability" if self._model.calibrated else "uncalibrated_probability"
         return (
             {
-                row.doc_id: float(probability)
-                for row, probability in zip(rows, probabilities, strict=True)
+                doc.doc_id: float(probability)
+                for doc, probability in zip(docs, probabilities, strict=True)
             },
             kind,
         )
@@ -109,6 +113,7 @@ class SystemAggregator:
         max_systems: int = 5,
         *,
         query_text: str = "",
+        gating_case: GatingCase | None = None,
     ) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
         for doc in evidence_docs:
@@ -121,7 +126,7 @@ class SystemAggregator:
             }
             score_kind = "heuristic"
         else:
-            doc_scores, score_kind = self._mil_doc_scores(query_text, evidence_docs)
+            doc_scores, score_kind = self._mil_doc_scores(query_text, evidence_docs, gating_case)
 
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():

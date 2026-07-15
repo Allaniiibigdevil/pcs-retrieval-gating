@@ -1,14 +1,17 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from app.decision.gating_features import (
     FEATURE_NAMES,
-    append_gating_feature_rows,
-    build_gating_feature_rows,
-    rows_to_mil_bags,
+    GatingCase,
+    append_gating_case,
+    build_gating_case,
+    cases_to_mil_bags,
     select_representative_docs,
 )
+from app.offline.train_gating_model import load_cases
 from app.schemas.search import SearchHit
 
 
@@ -51,37 +54,76 @@ def test_selects_es_vector_and_rrf_top3_then_deduplicates() -> None:
     }
 
 
-def test_feature_rows_form_one_nine_element_mil_bag(tmp_path) -> None:
-    rows = build_gating_feature_rows(
-        "query",
-        _nine_representative_candidates(),
+def test_one_jsonl_line_contains_a_case_with_system_bags(tmp_path) -> None:
+    candidates = [
+        *_nine_representative_candidates(),
+        SearchHit(
+            doc_id="album-1",
+            system_id="album",
+            summary="京都红色寺庙照片",
+            keywords=["京都", "寺庙"],
+            vector_score=0.6,
+            vector_rank=10,
+        ),
+    ]
+    case = build_gating_case(
+        "去年京都的红色寺庙",
+        candidates,
         task_id="t1",
-        labels_by_system={"memo": 1},
+        labels_by_system={"memo": 1, "album": 0},
     )
-    bags = rows_to_mil_bags(rows)
+    bags = cases_to_mil_bags([case])
 
-    assert len(rows) == 9
-    assert bags[0].features.shape == (9, len(FEATURE_NAMES))
-    assert bags[0].label == 1.0
+    systems = {system.system_id: system for system in case.systems}
+    assert case.task_id == "t1"
+    assert systems["memo"].label == 1
+    assert len(systems["memo"].docs) == 9
+    assert systems["album"].label == 0
+    assert len(systems["album"].docs) == 1
+    assert len(bags) == 2
+    assert next(bag for bag in bags if bag.system_id == "memo").features.shape == (
+        9,
+        len(FEATURE_NAMES),
+    )
+
+    output = tmp_path / "cases.jsonl"
+    append_gating_case(case, output)
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert "schema_version" not in payload
+    assert payload["task_id"] == "t1"
+    assert payload["systems"][0]["label"] in (0, 1)
+    assert "label" not in payload["systems"][0]["docs"][0]
+    assert load_cases(output) == [case]
+
     forbidden = ("source", "system", "capability", "cost", "latency", "count")
     assert all(
         not any(token in feature_name for token in forbidden) for feature_name in FEATURE_NAMES
     )
 
-    output = tmp_path / "samples.jsonl"
-    append_gating_feature_rows(rows, output)
-    payload = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
-    assert payload["doc_id"]
-    assert payload["label"] == 1
 
-
-def test_mil_bag_rejects_duplicate_documents() -> None:
-    rows = build_gating_feature_rows(
+def test_gating_case_rejects_duplicate_documents() -> None:
+    case = build_gating_case(
         "query",
         _nine_representative_candidates(),
         task_id="t1",
         labels_by_system={"memo": 1},
     )
+    payload = case.model_dump()
+    docs = payload["systems"][0]["docs"]
+    payload["systems"][0]["docs"] = [docs[0], docs[1], docs[0]]
 
-    with pytest.raises(ValueError, match="duplicate doc_id"):
-        rows_to_mil_bags([*rows, rows[0]])
+    with pytest.raises(ValidationError, match="duplicate doc_id"):
+        GatingCase.model_validate(payload)
+
+
+def test_unlabeled_system_bags_are_skipped() -> None:
+    case = build_gating_case(
+        "query",
+        _nine_representative_candidates(),
+        task_id="t1",
+    )
+
+    with pytest.raises(ValueError, match="no labeled MIL bags"):
+        cases_to_mil_bags([case])

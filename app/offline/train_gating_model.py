@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import random
 
 from app.config import get_settings
-from app.decision.gating_features import GatingFeatureRow, MilBag, rows_to_mil_bags
+from app.decision.gating_features import GatingCase, MilBag, cases_to_mil_bags
 from app.ml.mil_mlp import train_mil_mlp
 
 
-def load_rows(path: Path) -> list[GatingFeatureRow]:
-    rows: list[GatingFeatureRow] = []
+def load_cases(path: Path) -> list[GatingCase]:
+    cases: list[GatingCase] = []
     with path.open("r", encoding="utf-8") as file:
-        for line in file:
-            if line.strip():
-                rows.append(GatingFeatureRow(**json.loads(line)))
-    return rows
+        for line_no, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                cases.append(GatingCase.model_validate_json(line))
+            except Exception as exc:
+                raise ValueError(f"invalid gating case at {path}:{line_no}") from exc
+    return cases
 
 
 def split_bags_by_query(
@@ -39,7 +42,7 @@ def split_bags_by_query(
 def main() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(description="Train nine-representative max-MIL MLP.")
-    parser.add_argument("--input", default=settings.GATING_TRAINING_DATA_PATH)
+    parser.add_argument("--input", default=settings.GATING_CASES_PATH)
     parser.add_argument("--output", default=settings.GATING_MODEL_PATH)
     parser.add_argument("--learning-rate", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=500)
@@ -51,7 +54,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
 
-    bags = rows_to_mil_bags(load_rows(Path(args.input)))
+    bags = cases_to_mil_bags(load_cases(Path(args.input)))
     training, calibration = split_bags_by_query(bags, args.calibration_fraction, args.seed)
     model = train_mil_mlp(
         training,

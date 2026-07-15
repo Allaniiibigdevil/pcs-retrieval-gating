@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict, dataclass
-import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Literal, Mapping, Self
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
 from app.schemas.search import SearchHit
@@ -27,26 +27,50 @@ FEATURE_NAMES = [
 ]
 
 
-@dataclass(frozen=True)
-class GatingFeatureRow:
-    query: str
-    system_id: str
-    doc_id: str
-    task_id: str | None
-    label: int | None
-    vector_score_norm: float
-    vector_rank_score: float
-    es_score_query_norm: float
-    es_rank_score: float
-    rrf_score: float
-    same_doc_hit_by_both: float
-    matched_keyword_ratio: float
+class _GatingRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class GatingDoc(_GatingRecord):
+    doc_id: str = Field(min_length=1)
+    summary: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+    vector_score_norm: float = Field(ge=0.0, le=1.0)
+    vector_rank_score: float = Field(ge=0.0, le=1.0)
+    es_score_query_norm: float = Field(ge=0.0, le=1.0)
+    es_rank_score: float = Field(ge=0.0, le=1.0)
+    rrf_score: float = Field(ge=0.0, le=1.0)
+    same_doc_hit_by_both: float = Field(ge=0.0, le=1.0)
+    matched_keyword_ratio: float = Field(ge=0.0, le=1.0)
 
     def feature_vector(self) -> list[float]:
         return [float(getattr(self, name)) for name in FEATURE_NAMES]
 
-    def to_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False, separators=(",", ":"))
+
+class GatingSystemBag(_GatingRecord):
+    system_id: str = Field(min_length=1)
+    label: Literal[0, 1] | None = None
+    docs: list[GatingDoc] = Field(min_length=1, max_length=MAX_REPRESENTATIVE_DOCS)
+
+    @model_validator(mode="after")
+    def validate_unique_doc_ids(self) -> Self:
+        doc_ids = [doc.doc_id for doc in self.docs]
+        if len(set(doc_ids)) != len(doc_ids):
+            raise ValueError("duplicate doc_id in MIL bag")
+        return self
+
+
+class GatingCase(_GatingRecord):
+    task_id: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    systems: list[GatingSystemBag] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_system_ids(self) -> Self:
+        system_ids = [system.system_id for system in self.systems]
+        if len(set(system_ids)) != len(system_ids):
+            raise ValueError("duplicate system_id in gating case")
+        return self
 
 
 @dataclass(frozen=True)
@@ -79,7 +103,7 @@ def _rrf_norm(hit: SearchHit) -> float:
 
 
 def _top_by_rank(
-    docs: list[SearchHit], rank_field: str, score_field: str, limit: int = 3
+    docs: list[SearchHit], rank_field: str, score_field: str, limit: int = TOP_DOCS_PER_RANKER
 ) -> list[SearchHit]:
     ranked = [doc for doc in docs if getattr(doc, rank_field) is not None]
     if ranked:
@@ -99,8 +123,8 @@ def select_representative_docs(evidence_docs: list[SearchHit]) -> list[SearchHit
     for system_id in sorted(grouped):
         docs = grouped[system_id]
         selected = [
-            *_top_by_rank(docs, "bm25_rank", "bm25_score", TOP_DOCS_PER_RANKER),
-            *_top_by_rank(docs, "vector_rank", "vector_score", TOP_DOCS_PER_RANKER),
+            *_top_by_rank(docs, "bm25_rank", "bm25_score"),
+            *_top_by_rank(docs, "vector_rank", "vector_score"),
             *sorted(docs, key=_rrf_raw, reverse=True)[:TOP_DOCS_PER_RANKER],
         ]
         seen_doc_ids: set[str] = set()
@@ -124,93 +148,80 @@ def _matched_keyword_ratio(hit: SearchHit) -> float:
     return _clamp(len(matched & keywords) / len(keywords)) if keywords else 1.0
 
 
-def build_gating_feature_rows(
+def _build_gating_doc(doc: SearchHit, max_es_score: float) -> GatingDoc:
+    es_norm = (
+        _clamp(float(doc.bm25_score) / max_es_score)
+        if doc.bm25_score is not None and doc.bm25_score > 0 and max_es_score > 0
+        else 0.0
+    )
+    return GatingDoc(
+        doc_id=doc.doc_id,
+        summary=doc.summary,
+        keywords=list(doc.keywords),
+        vector_score_norm=(
+            _clamp(float(doc.vector_score)) if doc.vector_score is not None else 0.0
+        ),
+        vector_rank_score=_rank_score(doc.vector_rank),
+        es_score_query_norm=es_norm,
+        es_rank_score=_rank_score(doc.bm25_rank),
+        rrf_score=_rrf_norm(doc),
+        same_doc_hit_by_both=(
+            1.0 if doc.bm25_rank is not None and doc.vector_rank is not None else 0.0
+        ),
+        matched_keyword_ratio=_matched_keyword_ratio(doc),
+    )
+
+
+def build_gating_case(
     query: str,
     evidence_docs: list[SearchHit],
     *,
-    task_id: str | None = None,
-    label: int | None = None,
-    labels_by_system: Mapping[str, int] | None = None,
-) -> list[GatingFeatureRow]:
+    task_id: str,
+    labels_by_system: Mapping[str, Literal[0, 1]] | None = None,
+) -> GatingCase:
     max_es_score = max((doc.bm25_score or 0.0 for doc in evidence_docs), default=0.0)
-    rows: list[GatingFeatureRow] = []
+    docs_by_system: dict[str, list[GatingDoc]] = defaultdict(list)
     for doc in select_representative_docs(evidence_docs):
-        es_norm = (
-            _clamp(float(doc.bm25_score) / max_es_score)
-            if doc.bm25_score is not None and doc.bm25_score > 0 and max_es_score > 0
-            else 0.0
+        docs_by_system[doc.system_id].append(_build_gating_doc(doc, max_es_score))
+
+    systems = [
+        GatingSystemBag(
+            system_id=system_id,
+            label=labels_by_system.get(system_id) if labels_by_system is not None else None,
+            docs=docs_by_system[system_id],
         )
-        row_label = (
-            labels_by_system.get(doc.system_id, label) if labels_by_system is not None else label
-        )
-        rows.append(
-            GatingFeatureRow(
-                query=query,
-                system_id=doc.system_id,
-                doc_id=doc.doc_id,
-                task_id=task_id,
-                label=row_label,
-                vector_score_norm=(
-                    _clamp(float(doc.vector_score)) if doc.vector_score is not None else 0.0
-                ),
-                vector_rank_score=_rank_score(doc.vector_rank),
-                es_score_query_norm=es_norm,
-                es_rank_score=_rank_score(doc.bm25_rank),
-                rrf_score=_rrf_norm(doc),
-                same_doc_hit_by_both=(
-                    1.0 if doc.bm25_rank is not None and doc.vector_rank is not None else 0.0
-                ),
-                matched_keyword_ratio=_matched_keyword_ratio(doc),
-            )
-        )
-    return rows
+        for system_id in sorted(docs_by_system)
+    ]
+    return GatingCase(task_id=task_id, query=query, systems=systems)
 
 
-def append_gating_feature_rows(
-    rows: list[GatingFeatureRow], path: str | Path | None = None
-) -> None:
-    if not rows:
-        return
-    output_path = Path(path or get_settings().GATING_TRAINING_DATA_PATH)
+def append_gating_case(case: GatingCase, path: str | Path | None = None) -> None:
+    output_path = Path(path or get_settings().GATING_CASES_PATH)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8") as file:
-        for row in rows:
-            file.write(row.to_json() + "\n")
+        file.write(case.model_dump_json() + "\n")
 
 
-def rows_to_mil_bags(rows: list[GatingFeatureRow]) -> list[MilBag]:
-    grouped: dict[tuple[str, str], list[GatingFeatureRow]] = defaultdict(list)
-    for row in rows:
-        if row.label is not None:
-            grouped[(row.task_id or row.query, row.system_id)].append(row)
+def cases_to_mil_bags(cases: list[GatingCase]) -> list[MilBag]:
+    task_ids = [case.task_id for case in cases]
+    if len(set(task_ids)) != len(task_ids):
+        raise ValueError("duplicate task_id in gating dataset")
 
     bags: list[MilBag] = []
-    for (query_key, system_id), bag_rows in grouped.items():
-        labels = {int(row.label) for row in bag_rows if row.label is not None}
-        if len(labels) != 1:
-            raise ValueError(
-                f"inconsistent labels in MIL bag query={query_key!r} system={system_id!r}"
+    for case in cases:
+        for system in case.systems:
+            if system.label is None:
+                continue
+            bags.append(
+                MilBag(
+                    query_key=case.task_id,
+                    system_id=system.system_id,
+                    features=np.asarray(
+                        [doc.feature_vector() for doc in system.docs], dtype=np.float32
+                    ),
+                    label=float(system.label),
+                )
             )
-        if not labels <= {0, 1}:
-            raise ValueError("MIL bag labels must be 0 or 1")
-        doc_ids = [row.doc_id for row in bag_rows]
-        if len(set(doc_ids)) != len(doc_ids):
-            raise ValueError(
-                f"duplicate doc_id in MIL bag query={query_key!r} system={system_id!r}"
-            )
-        if len(bag_rows) > MAX_REPRESENTATIVE_DOCS:
-            raise ValueError(
-                f"MIL bag exceeds {MAX_REPRESENTATIVE_DOCS} documents "
-                f"query={query_key!r} system={system_id!r}"
-            )
-        bags.append(
-            MilBag(
-                query_key=query_key,
-                system_id=system_id,
-                features=np.asarray([row.feature_vector() for row in bag_rows], dtype=np.float32),
-                label=float(labels.pop()),
-            )
-        )
     if not bags:
         raise ValueError("no labeled MIL bags found")
     return bags
