@@ -42,6 +42,21 @@ class LocalFaissRetriever:
 
         query_embedding = await self.embedding_service.embed(query)
         vector = np.asarray([query_embedding], dtype="float32")
+        if vector.ndim != 2 or vector.shape[0] != 1:
+            raise RuntimeError(
+                f"Query embedding must have shape (1, d), received {vector.shape}"
+            )
+        index_dim = int(self._index.d)
+        query_dim = int(vector.shape[1])
+        if query_dim != index_dim:
+            model_path = get_settings().EMBEDDING_MODEL_PATH
+            raise RuntimeError(
+                "FAISS index dimension mismatch: "
+                f"index dimension is {index_dim}, query embedding dimension is {query_dim}, "
+                f"configured model is {model_path!r}. Rebuild the FAISS artifacts with "
+                "`uv run python -m app.offline.build_index` and restart the service, or restore "
+                "the embedding model recorded in data/artifacts/manifest.json."
+            )
         scores, indices = self._index.search(vector, min(top_k, len(self._doc_ids)))
 
         hits: list[SearchHit] = []

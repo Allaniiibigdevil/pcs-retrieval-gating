@@ -166,6 +166,11 @@ data/artifacts/faiss_doc_ids.json
 data/artifacts/manifest.json
 ```
 
+`faiss.index` 的维度与构建时使用的 embedding 模型绑定。修改
+`EMBEDDING_MODEL_PATH` 后必须重新运行建索引命令并重启服务；否则 query embedding
+与旧索引维度不一致。可以先查看 `data/artifacts/manifest.json` 中记录的
+`embedding_model` 和 `embedding_dim`。
+
 ## 启动服务
 
 ```bash
