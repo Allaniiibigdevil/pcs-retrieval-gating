@@ -155,9 +155,15 @@ function renderDecision(data) {
                 ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
               </div>
               <div class="doc-meta">
-                BM25 ${formatNumber(doc.bm25_score)} (#${doc.bm25_rank ?? "-"}) /
-                Vector ${formatNumber(doc.vector_score)} (#${doc.vector_rank ?? "-"}) /
-                RRF ${formatNumber(doc.rrf_score)}
+                <div class="retrieval-scores">
+                  <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
+                  <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
+                </div>
+                <div class="retrieval-ranks">
+                  <span>BM25 排名 <strong>${doc.bm25_rank ? `#${doc.bm25_rank}` : "未召回"}</strong></span>
+                  <span>FAISS 排名 <strong>${doc.vector_rank ? `#${doc.vector_rank}` : "未召回"}</strong></span>
+                  <span>RRF 排名 <strong>#${doc.rrf_rank}</strong></span>
+                </div>
               </div>
             </article>
           `,
@@ -169,12 +175,6 @@ function renderDecision(data) {
           <div class="system-topline">
             <div class="system-name">${escapeHtml(item.system_id)}</div>
             <span class="badge ${item.selected ? "selected" : ""}">${item.selected ? "selected" : "candidate"}</span>
-          </div>
-          <div class="rrf-score">
-            <div class="score-line">
-              <strong>${formatNumber(item.rrf_score)}</strong>
-              <span>system best RRF</span>
-            </div>
           </div>
           <div class="evidence">
             <strong>证据</strong>

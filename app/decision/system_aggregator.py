@@ -57,6 +57,10 @@ class SystemAggregator:
         ]
         scored_docs = [item for item in scored_docs if item[1] > 0.0]
         scored_docs.sort(key=_doc_sort_key)
+        rrf_rank_by_doc_id = {
+            doc.doc_id: rank
+            for rank, (doc, _) in enumerate(scored_docs, start=1)
+        }
 
         selected_doc_ids = {doc.doc_id for doc, _ in scored_docs[: self.top_n_docs]}
         grouped: dict[str, list[tuple[SearchHit, float]]] = defaultdict(list)
@@ -84,6 +88,7 @@ class SystemAggregator:
                             bm25_rank=doc.bm25_rank,
                             vector_rank=doc.vector_rank,
                             rrf_score=score,
+                            rrf_rank=rrf_rank_by_doc_id[doc.doc_id],
                         )
                         for doc, score in evidence
                     ],

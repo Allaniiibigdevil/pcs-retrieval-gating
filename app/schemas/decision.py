@@ -24,6 +24,7 @@ class EvidenceDoc(BaseModel):
     bm25_rank: int | None = None
     vector_rank: int | None = None
     rrf_score: float
+    rrf_rank: int
 
 
 class SystemDecision(BaseModel):

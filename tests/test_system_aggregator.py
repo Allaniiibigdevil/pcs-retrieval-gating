@@ -111,10 +111,29 @@ def test_system_aggregator_exposes_doc_scores_keywords_and_highlight() -> None:
     assert evidence.keywords == ["海鲜过敏"]
     assert evidence.matched_keywords == ["海鲜过敏"]
     assert evidence.rrf_score == pytest.approx(1 / 21 + 1 / 22, abs=1e-6)
+    assert evidence.rrf_rank == 1
     assert evidence.highlight == {
         "summary": ["记录了用户对<em>海鲜</em>过敏"],
         "keywords": ["<em>海鲜过敏</em>"],
     }
+
+
+def test_system_aggregator_exposes_global_rrf_rank() -> None:
+    aggregator = SystemAggregator(rrf_k=20, top_n_docs=10)
+    decisions = aggregator.aggregate(
+        [
+            hit("shared", "memo", bm25_rank=1, vector_rank=2),
+            hit("vector_first", "album", vector_rank=1),
+            hit("es_third", "todo", bm25_rank=3),
+        ]
+    )
+
+    ranks = {
+        doc.doc_id: doc.rrf_rank
+        for decision in decisions
+        for doc in decision.evidence_docs
+    }
+    assert ranks == {"shared": 1, "vector_first": 2, "es_third": 3}
 
 
 @pytest.mark.parametrize("kwargs", [{"rrf_k": 0}, {"top_n_docs": 0}])

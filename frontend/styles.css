@@ -393,26 +393,20 @@ input:focus {
   color: #475569;
 }
 
-.rrf-score {
-  margin-top: 12px;
-}
-
-.score-line {
+.retrieval-scores,
+.retrieval-ranks {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 6px 14px;
 }
 
-.score-line strong {
-  color: var(--accent-dark);
-  font-size: 20px;
+.retrieval-ranks {
+  margin-top: 4px;
 }
 
-.score-line span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
+.retrieval-scores strong,
+.retrieval-ranks strong {
+  color: var(--ink);
 }
 
 .evidence,

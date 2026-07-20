@@ -255,7 +255,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
           "vector_score": 0.84,
           "bm25_rank": 1,
           "vector_rank": 1,
-          "rrf_score": 0.095238
+          "rrf_score": 0.095238,
+          "rrf_rank": 1
         }
       ]
     }
@@ -271,6 +272,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 - `selected`：该 system 是否至少有一篇文档进入全局 RRF Top-N。
 - `rrf_score`：该 system 最佳候选文档的 RRF 分数，不是概率。
 - `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
+- `rrf_rank`：文档在合并候选中的全局 RRF 排名；前端与 BM25、FAISS 排名一起展示。
 
 ## 测试和检查
 
