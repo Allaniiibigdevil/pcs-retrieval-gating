@@ -1,5 +1,6 @@
 import logging
 
+from app.config import get_settings
 from app.decision.evidence_builder import EvidenceBuilder
 from app.decision.query_normalizer import QueryNormalizer
 from app.decision.system_aggregator import SystemAggregator
@@ -33,9 +34,11 @@ class DecisionEngine:
         self,
         task: str,
         task_id: str | None = None,
-        top_k_docs: int = 50,
-        max_systems: int = 5,
+        top_k_docs: int | None = None,
     ) -> DecideResponse:
+        effective_top_k = (
+            get_settings().DEFAULT_TOP_K_DOCS if top_k_docs is None else top_k_docs
+        )
         timer = StageTimer()
         bm25_query = self.normalizer.normalize(task)
         vector_query = task
@@ -47,14 +50,14 @@ class DecisionEngine:
         vector_error: Exception | None = None
 
         try:
-            bm25_hits = await self.keyword_retriever.search(bm25_query, top_k_docs)
+            bm25_hits = await self.keyword_retriever.search(bm25_query, effective_top_k)
         except Exception as exc:
             keyword_error = exc
             logger.exception("keyword_search_failed", extra={"task_id": task_id})
         timer.mark("keyword_search")
 
         try:
-            vector_hits = await self.vector_retriever.search(vector_query, top_k_docs)
+            vector_hits = await self.vector_retriever.search(vector_query, effective_top_k)
         except Exception as exc:
             vector_error = exc
             logger.exception("vector_search_failed", extra={"task_id": task_id})
@@ -67,7 +70,7 @@ class DecisionEngine:
         candidates = self.merger.merge(bm25_hits, vector_hits)
         timer.mark("merge")
         evidence_docs = self.evidence_builder.build(task, candidates)
-        decisions = self.aggregator.aggregate(evidence_docs, max_systems)
+        decisions = self.aggregator.aggregate(evidence_docs)
         selected_systems = [item.system_id for item in decisions if item.selected]
         timer.mark("aggregate")
         latency_ms = timer.finish()

@@ -1,11 +1,16 @@
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
+
 
 class DecideRequest(BaseModel):
     task_id: str | None = None
     task: str
-    top_k_docs: int = 50
-    max_systems: int = 5
+    top_k_docs: int = Field(
+        default_factory=lambda: get_settings().DEFAULT_TOP_K_DOCS,
+        ge=1,
+        le=1000,
+    )
 
 
 class EvidenceDoc(BaseModel):
@@ -18,12 +23,13 @@ class EvidenceDoc(BaseModel):
     vector_score: float | None = None
     bm25_rank: int | None = None
     vector_rank: int | None = None
+    rrf_score: float
 
 
 class SystemDecision(BaseModel):
     system_id: str
     selected: bool
-    confidence: float
+    rrf_score: float
     evidence_docs: list[EvidenceDoc]
 
 

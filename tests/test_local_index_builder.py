@@ -40,7 +40,11 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     assert artifact_store.faiss_doc_ids_path.exists()
     assert artifact_store.manifest_path.exists()
 
-    vector_hits = await LocalFaissRetriever(artifact_store, embedding_service).search(
+    vector_hits = await LocalFaissRetriever(
+        artifact_store,
+        embedding_service,
+        score_threshold=-1.0,
+    ).search(
         "shanghai trip meeting",
         top_k=2,
     )
@@ -49,3 +53,10 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     assert all(
         hit.vector_score is not None and math.isfinite(hit.vector_score) for hit in vector_hits
     )
+
+    filtered_hits = await LocalFaissRetriever(
+        artifact_store,
+        embedding_service,
+        score_threshold=1.0,
+    ).search("shanghai trip meeting", top_k=2)
+    assert filtered_hits == []

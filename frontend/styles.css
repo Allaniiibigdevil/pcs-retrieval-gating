@@ -393,7 +393,7 @@ input:focus {
   color: #475569;
 }
 
-.confidence {
+.rrf-score {
   margin-top: 12px;
 }
 
@@ -413,19 +413,6 @@ input:focus {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
-}
-
-.meter {
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #dde5eb;
-}
-
-.meter > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
 }
 
 .evidence,

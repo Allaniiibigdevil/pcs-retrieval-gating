@@ -29,7 +29,7 @@ async def test_decision_engine_returns_selected_systems() -> None:
                 )
             ]
         ),
-        aggregator=SystemAggregator(selection_threshold=0.45),
+        aggregator=SystemAggregator(rrf_k=20, top_n_docs=10),
     )
 
     response = await engine.decide("我可以吃海鲜吗？")
@@ -37,3 +37,4 @@ async def test_decision_engine_returns_selected_systems() -> None:
     assert response.selected_systems == ["notepad"]
     assert response.decisions[0].system_id == "notepad"
     assert response.decisions[0].selected is True
+    assert response.decisions[0].rrf_score == pytest.approx(1 / 21, abs=1e-6)

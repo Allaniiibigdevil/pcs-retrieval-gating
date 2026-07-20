@@ -4,8 +4,10 @@
 
 ```text
 用户任务
-  -> ES / FAISS 找到相关文档证据
-  -> 聚合到 system_id
+  -> ES / FAISS 全局召回文档
+  -> FAISS 相似度阈值过滤
+  -> RRF 融合两个文档排名
+  -> 全局 Top-N 文档映射到 system_id
   -> 输出 selected_systems
 ```
 
@@ -89,11 +91,10 @@ LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
-SYSTEM_SELECTION_THRESHOLD=0.60
-ES_SCORE_WEIGHT=0.55
-AGREEMENT_WEIGHT=0.20
-SEMANTIC_MATCH_THRESHOLD=0.30
-LEXICAL_MATCH_THRESHOLD=0.30
+DEFAULT_TOP_K_DOCS=50
+FAISS_SCORE_THRESHOLD=0.60
+RRF_K=20
+RRF_TOP_N_DOCS=10
 ```
 
 ## 查询处理
@@ -112,38 +113,28 @@ ES 证据匹配由 ES analyzer 决定。修改 ES analyzer 词表后，建议用
 
 ## 评分机制
 
-当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，只在当前 query 的候选集合内归一化：
+当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做 Reciprocal Rank Fusion。ES 与 FAISS 各自执行全局 Top-K 召回，FAISS 文档在进入融合前必须满足：
 
 ```text
-vector_score_norm = clamp(vector_score, 0, 1)
-es_score_norm = es_score / max_es_score_in_candidates
+vector_score >= FAISS_SCORE_THRESHOLD
 ```
 
-单文档强度：
+同一个 `doc_id` 在两路候选中合并后，文档 RRF 分数为：
 
 ```text
-base_score = max(vector_score_norm, ES_SCORE_WEIGHT * es_score_norm)
-agreement_score = AGREEMENT_WEIGHT * sqrt(vector_score_norm * es_score_norm) if (
-  vector_score_norm >= SEMANTIC_MATCH_THRESHOLD
-  and es_score_norm >= LEXICAL_MATCH_THRESHOLD
-) else 0
-doc_strength = clamp(
-  base_score + agreement_score,
-  0,
-  1
-)
+rrf(doc) =
+  I(doc in ES) / (RRF_K + es_rank)
+  + I(doc in FAISS) / (RRF_K + vector_rank)
 ```
 
 说明：
 
-- `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
-- `es_score_norm`：ES 分在当前 query 候选集内的相对强度，最高分为 1，不用于跨 query 比较。
-- `base_score`：取向量分和加权 ES 分的较大值，任意一路强命中都能作为基础证据。
-- `ES_SCORE_WEIGHT`：限制 ES 单路第一名的最高基础贡献，避免其因归一化为 1 而自动入选。
-- `agreement_score`：同一文档被两路命中且均达到最低门槛时，按两路分数几何平均给予连续奖励。
-- `AGREEMENT_WEIGHT`：一致性奖励的系数。
-- 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
-- `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
+- 某一路没有召回该文档时，该路贡献为 0。
+- `RRF_K` 控制排名位置差异；当前默认值 20，适合较浅的候选列表。
+- 全局按 `rrf(doc)` 排序后取 `RRF_TOP_N_DOCS` 篇文档，默认取前 10 篇。
+- 只要一个 system 至少有一篇文档进入全局 RRF Top-N，就进入 `selected_systems`。
+- system 的展示分数是该 system 最佳文档的 RRF 分数，不对多篇文档求和。
+- RRF 分数不是相关概率；空结果依赖 ES 无命中以及 FAISS 阈值过滤后无候选。
 
 ## 离线灌入和建索引
 
@@ -230,7 +221,7 @@ curl -X POST http://127.0.0.1:8000/v1/search/vector ^
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/decide ^
   -H "Content-Type: application/json" ^
-  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50,\"max_systems\":5}"
+  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50}"
 ```
 
 返回示例：
@@ -244,7 +235,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
     {
       "system_id": "notepad",
       "selected": true,
-      "confidence": 0.84,
+      "rrf_score": 0.095238,
       "evidence_docs": [
         {
           "doc_id": "3",
@@ -258,7 +249,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
           "bm25_score": 1.2,
           "vector_score": 0.84,
           "bm25_rank": 1,
-          "vector_rank": 1
+          "vector_rank": 1,
+          "rrf_score": 0.095238
         }
       ]
     }
@@ -271,8 +263,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 
 - `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
 - `decisions`：候选子系统的解释信息，用于调试和观察。
-- `selected`：该候选系统是否进入 `selected_systems`。
-- `confidence`：该系统最强证据文档的强度分。
+- `selected`：该 system 是否至少有一篇文档进入全局 RRF Top-N。
+- `rrf_score`：该 system 最佳候选文档的 RRF 分数，不是概率。
 - `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
 
 ## 测试和检查
@@ -303,5 +295,5 @@ uv run python -m compileall app tests
 - 文档更新后需要重新运行离线索引构建。
 - 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
 - 向量检索使用原始 query，不做停用词删除。
-- 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
+- 当前 scoring 使用 RRF 排名融合，不对 BM25 和向量原始分做加权。
 - 最终输出目标是子系统选择，不是文档排序。

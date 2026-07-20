@@ -1,5 +1,6 @@
 import numpy as np
 
+from app.config import get_settings
 from app.embedding.embedding_service import EmbeddingService, get_embedding_service
 from app.schemas.doc import SourceDoc
 from app.schemas.search import SearchHit
@@ -11,9 +12,14 @@ class LocalFaissRetriever:
         self,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
+        score_threshold: float | None = None,
     ) -> None:
+        settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service
+        self.score_threshold = (
+            settings.FAISS_SCORE_THRESHOLD if score_threshold is None else score_threshold
+        )
         self._docs_by_id: dict[str, SourceDoc] | None = None
         self._doc_ids: list[str] | None = None
         self._index = None
@@ -42,6 +48,9 @@ class LocalFaissRetriever:
         for rank, (score, index) in enumerate(zip(scores[0], indices[0]), start=1):
             if index < 0:
                 continue
+            vector_score = float(score)
+            if vector_score < self.score_threshold:
+                continue
             doc = self._docs_by_id[self._doc_ids[int(index)]]
             hits.append(
                 SearchHit(
@@ -50,7 +59,7 @@ class LocalFaissRetriever:
                     summary=doc.summary,
                     keywords=doc.keywords,
                     metadata=doc.metadata,
-                    vector_score=float(score),
+                    vector_score=vector_score,
                     vector_rank=rank,
                 )
             )

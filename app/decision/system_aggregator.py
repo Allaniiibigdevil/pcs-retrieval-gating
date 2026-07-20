@@ -1,4 +1,3 @@
-import math
 from collections import defaultdict
 
 from app.config import get_settings
@@ -6,101 +5,73 @@ from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
 
 
-def _clamp(value: float) -> float:
-    return min(max(value, 0.0), 1.0)
+def reciprocal_rank_fusion_score(hit: SearchHit, rank_constant: int) -> float:
+    """Fuse the ES and FAISS ranks for one document."""
 
-
-def _vector_score_norm(hit: SearchHit) -> float:
-    if hit.vector_score is not None:
-        return _clamp(hit.vector_score)
-    if hit.vector_rank is not None:
-        return max(0.0, 1.0 - (hit.vector_rank - 1) / 50)
-    return 0.0
-
-
-def _es_score_norm(hit: SearchHit, max_es_score: float) -> float:
-    """Normalize ES scores within one query's candidate set."""
-    if hit.bm25_score is None or hit.bm25_score <= 0 or max_es_score <= 0:
-        return 0.0
-    return _clamp(hit.bm25_score / max_es_score)
-
-
-def simple_doc_strength(hit: SearchHit, max_es_score: float = 0.0) -> float:
-    settings = get_settings()
-    semantic_score = _vector_score_norm(hit)
-    lexical_score = _es_score_norm(hit, max_es_score)
-    agreement_boost = (
-        settings.AGREEMENT_WEIGHT * math.sqrt(semantic_score * lexical_score)
-        if semantic_score >= settings.SEMANTIC_MATCH_THRESHOLD
-        and lexical_score >= settings.LEXICAL_MATCH_THRESHOLD
-        else 0.0
-    )
-
-    return _clamp(
-        max(semantic_score, settings.ES_SCORE_WEIGHT * lexical_score) + agreement_boost
-    )
+    score = 0.0
+    if hit.bm25_rank is not None and hit.bm25_rank > 0:
+        score += 1.0 / (rank_constant + hit.bm25_rank)
+    if hit.vector_rank is not None and hit.vector_rank > 0:
+        score += 1.0 / (rank_constant + hit.vector_rank)
+    return score
 
 
 def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
     highlight = doc.metadata.get("highlight")
     if not isinstance(highlight, dict):
         return {}
-
-    normalized: dict[str, list[str]] = {}
-    for field in ("summary", "keywords"):
-        values = highlight.get(field)
-        if isinstance(values, list):
-            normalized[field] = [str(value) for value in values]
-    return normalized
+    return {
+        field: [str(value) for value in highlight[field]]
+        for field in ("summary", "keywords")
+        if isinstance(highlight.get(field), list)
+    }
 
 
-def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
-    highlight = doc.metadata.get("highlight")
-    if not isinstance(highlight, dict):
-        return {}
-
-    normalized: dict[str, list[str]] = {}
-    for field in ("summary", "keywords"):
-        values = highlight.get(field)
-        if isinstance(values, list):
-            normalized[field] = [str(value) for value in values]
-    return normalized
+def _doc_sort_key(item: tuple[SearchHit, float]) -> tuple[float, int, int, str]:
+    doc, score = item
+    ranks = [
+        rank
+        for rank in (doc.bm25_rank, doc.vector_rank)
+        if rank is not None and rank > 0
+    ]
+    return (-score, min(ranks), sum(ranks), doc.doc_id)
 
 
 class SystemAggregator:
-    def __init__(self, selection_threshold: float | None = None) -> None:
+    def __init__(
+        self,
+        rrf_k: int | None = None,
+        top_n_docs: int | None = None,
+    ) -> None:
         settings = get_settings()
-        self.selection_threshold = (
-            settings.SYSTEM_SELECTION_THRESHOLD
-            if selection_threshold is None
-            else selection_threshold
-        )
+        self.rrf_k = settings.RRF_K if rrf_k is None else rrf_k
+        self.top_n_docs = settings.RRF_TOP_N_DOCS if top_n_docs is None else top_n_docs
+        if self.rrf_k <= 0:
+            raise ValueError("rrf_k must be greater than 0")
+        if self.top_n_docs <= 0:
+            raise ValueError("top_n_docs must be greater than 0")
 
-    def aggregate(self, evidence_docs: list[SearchHit], max_systems: int = 5) -> list[SystemDecision]:
-        grouped: dict[str, list[SearchHit]] = defaultdict(list)
-        for doc in evidence_docs:
-            grouped[doc.system_id].append(doc)
+    def aggregate(self, evidence_docs: list[SearchHit]) -> list[SystemDecision]:
+        scored_docs = [
+            (doc, reciprocal_rank_fusion_score(doc, self.rrf_k)) for doc in evidence_docs
+        ]
+        scored_docs = [item for item in scored_docs if item[1] > 0.0]
+        scored_docs.sort(key=_doc_sort_key)
 
-        max_es_score = max(
-            (doc.bm25_score or 0.0 for doc in evidence_docs),
-            default=0.0,
-        )
+        selected_doc_ids = {doc.doc_id for doc, _ in scored_docs[: self.top_n_docs]}
+        grouped: dict[str, list[tuple[SearchHit, float]]] = defaultdict(list)
+        for doc, score in scored_docs:
+            grouped[doc.system_id].append((doc, score))
+
         decisions: list[SystemDecision] = []
-        for system_id, docs in grouped.items():
-            sorted_docs = sorted(
-                docs,
-                key=lambda doc: simple_doc_strength(doc, max_es_score),
-                reverse=True,
-            )
-            top_docs = sorted_docs[:3]
-            confidence = simple_doc_strength(top_docs[0], max_es_score) if top_docs else 0.0
-            selected = confidence >= self.selection_threshold
-
+        for system_id, system_docs in grouped.items():
+            system_docs.sort(key=_doc_sort_key)
+            evidence = system_docs[:3]
             decisions.append(
                 SystemDecision(
                     system_id=system_id,
-                    selected=selected,
-                    confidence=round(confidence, 4),
+                    selected=any(doc.doc_id in selected_doc_ids for doc, _ in system_docs),
+                    rrf_score=system_docs[0][1],
                     evidence_docs=[
                         EvidenceDoc(
                             doc_id=doc.doc_id,
@@ -112,10 +83,11 @@ class SystemAggregator:
                             vector_score=doc.vector_score,
                             bm25_rank=doc.bm25_rank,
                             vector_rank=doc.vector_rank,
+                            rrf_score=score,
                         )
-                        for doc in top_docs
+                        for doc, score in evidence
                     ],
                 )
             )
 
-        return sorted(decisions, key=lambda item: item.confidence, reverse=True)[:max_systems]
+        return sorted(decisions, key=lambda item: (-item.rrf_score, item.system_id))

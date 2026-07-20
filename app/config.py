@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,15 +38,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = 512
 
-    DEFAULT_TOP_K_DOCS: int = 50
-    DEFAULT_MAX_SYSTEMS: int = 5
-    VECTOR_TOP_K: int = 50
-
-    SYSTEM_SELECTION_THRESHOLD: float = 0.60
-    ES_SCORE_WEIGHT: float = 0.55
-    AGREEMENT_WEIGHT: float = 0.20
-    SEMANTIC_MATCH_THRESHOLD: float = 0.30
-    LEXICAL_MATCH_THRESHOLD: float = 0.30
+    DEFAULT_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
+    FAISS_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
+    RRF_K: int = Field(default=20, ge=1)
+    RRF_TOP_N_DOCS: int = Field(default=10, ge=1)
 
 
 @lru_cache

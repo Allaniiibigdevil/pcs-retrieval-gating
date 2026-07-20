@@ -1,12 +1,9 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
   topKDocs: 50,
-  maxSystems: 5,
-  threshold: 0.6,
-  esWeight: 0.55,
-  agreementWeight: 0.2,
-  semanticThreshold: 0.3,
-  lexicalThreshold: 0.3,
+  faissScoreThreshold: 0.6,
+  rrfK: 20,
+  rrfTopNDocs: 10,
 };
 
 const state = {
@@ -26,7 +23,7 @@ const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v4") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v5") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -34,7 +31,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v4", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v5", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -120,7 +117,6 @@ async function postDecide(task) {
     body: JSON.stringify({
       task,
       top_k_docs: Number(state.settings.topKDocs),
-      max_systems: Number(state.settings.maxSystems),
     }),
   });
 
@@ -146,7 +142,6 @@ function renderDecision(data) {
 
   systemList.innerHTML = data.decisions
     .map((item) => {
-      const width = Math.max(0, Math.min(100, Number(item.confidence || 0) * 100));
       const evidence = (item.evidence_docs || [])
         .map(
           (doc) => `
@@ -159,7 +154,11 @@ function renderDecision(data) {
               <div class="keyword-list">
                 ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
               </div>
-              <div class="doc-meta">BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)}</div>
+              <div class="doc-meta">
+                BM25 ${formatNumber(doc.bm25_score)} (#${doc.bm25_rank ?? "-"}) /
+                Vector ${formatNumber(doc.vector_score)} (#${doc.vector_rank ?? "-"}) /
+                RRF ${formatNumber(doc.rrf_score)}
+              </div>
             </article>
           `,
         )
@@ -171,11 +170,10 @@ function renderDecision(data) {
             <div class="system-name">${escapeHtml(item.system_id)}</div>
             <span class="badge ${item.selected ? "selected" : ""}">${item.selected ? "selected" : "candidate"}</span>
           </div>
-          <div class="confidence">
-            <div class="meter"><span style="width:${width}%"></span></div>
+          <div class="rrf-score">
             <div class="score-line">
-              <strong>${formatNumber(item.confidence)}</strong>
-              <span>confidence</span>
+              <strong>${formatNumber(item.rrf_score)}</strong>
+              <span>system best RRF</span>
             </div>
           </div>
           <div class="evidence">
@@ -243,12 +241,9 @@ function renderDocs() {
 function fillSettingsForm() {
   document.querySelector("#apiBaseInput").value = state.settings.apiBase;
   document.querySelector("#topKInput").value = state.settings.topKDocs;
-  document.querySelector("#maxSystemsInput").value = state.settings.maxSystems;
-  document.querySelector("#thresholdInput").value = state.settings.threshold;
-  document.querySelector("#esWeightInput").value = state.settings.esWeight;
-  document.querySelector("#agreementWeightInput").value = state.settings.agreementWeight;
-  document.querySelector("#semanticThresholdInput").value = state.settings.semanticThreshold;
-  document.querySelector("#lexicalThresholdInput").value = state.settings.lexicalThreshold;
+  document.querySelector("#faissScoreThresholdInput").value = state.settings.faissScoreThreshold;
+  document.querySelector("#rrfKInput").value = state.settings.rrfK;
+  document.querySelector("#rrfTopNDocsInput").value = state.settings.rrfTopNDocs;
   renderEnvPreview();
 }
 
@@ -256,16 +251,13 @@ function readSettingsForm() {
   state.settings = {
     apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
     topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
-    maxSystems: Number(document.querySelector("#maxSystemsInput").value || defaultSettings.maxSystems),
-    threshold: Number(document.querySelector("#thresholdInput").value || defaultSettings.threshold),
-    esWeight: Number(document.querySelector("#esWeightInput").value || defaultSettings.esWeight),
-    agreementWeight: Number(
-      document.querySelector("#agreementWeightInput").value || defaultSettings.agreementWeight,
+    faissScoreThreshold: Number(
+      document.querySelector("#faissScoreThresholdInput").value || defaultSettings.faissScoreThreshold,
     ),
-    semanticThreshold: Number(
-      document.querySelector("#semanticThresholdInput").value || defaultSettings.semanticThreshold,
+    rrfK: Number(document.querySelector("#rrfKInput").value || defaultSettings.rrfK),
+    rrfTopNDocs: Number(
+      document.querySelector("#rrfTopNDocsInput").value || defaultSettings.rrfTopNDocs,
     ),
-    lexicalThreshold: Number(document.querySelector("#lexicalThresholdInput").value || defaultSettings.lexicalThreshold),
   };
   saveSettingsDraft();
   renderEnvPreview();
@@ -274,12 +266,9 @@ function readSettingsForm() {
 function buildEnvPreview() {
   return [
     `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
-    `DEFAULT_MAX_SYSTEMS=${state.settings.maxSystems}`,
-    `SYSTEM_SELECTION_THRESHOLD=${state.settings.threshold}`,
-    `ES_SCORE_WEIGHT=${state.settings.esWeight}`,
-    `AGREEMENT_WEIGHT=${state.settings.agreementWeight}`,
-    `SEMANTIC_MATCH_THRESHOLD=${state.settings.semanticThreshold}`,
-    `LEXICAL_MATCH_THRESHOLD=${state.settings.lexicalThreshold}`,
+    `FAISS_SCORE_THRESHOLD=${state.settings.faissScoreThreshold}`,
+    `RRF_K=${state.settings.rrfK}`,
+    `RRF_TOP_N_DOCS=${state.settings.rrfTopNDocs}`,
   ].join("\n");
 }
 
@@ -359,7 +348,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #esWeightInput, #agreementWeightInput, #semanticThresholdInput, #lexicalThresholdInput",
+    "#apiBaseInput, #topKInput, #faissScoreThresholdInput, #rrfKInput, #rrfTopNDocsInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);
