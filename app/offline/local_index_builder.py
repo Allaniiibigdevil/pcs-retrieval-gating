@@ -69,6 +69,7 @@ class LocalIndexBuilder:
                 "elasticsearch_indexed": self.index_elasticsearch,
                 "elasticsearch_url": self.settings.LOCAL_ES_URL,
                 "elasticsearch_index": self.settings.LOCAL_ES_INDEX,
+                "elasticsearch_synonyms_path": self.settings.LOCAL_ES_SYNONYMS_PATH or None,
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": int(embedding_matrix.shape[1]),

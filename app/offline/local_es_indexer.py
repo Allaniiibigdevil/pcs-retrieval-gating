@@ -5,6 +5,10 @@ from app.config import get_settings
 from app.schemas.doc import SourceDoc
 
 
+SYNONYM_FILTER_NAME = "pcs_synonyms"
+SYNONYM_SEARCH_ANALYZER_NAME = "pcs_synonym_search"
+
+
 class LocalElasticsearchIndexer:
     def __init__(self, base_url: str | None = None, index_name: str | None = None) -> None:
         settings = get_settings()
@@ -21,16 +25,40 @@ class LocalElasticsearchIndexer:
     def _mapping(self) -> dict:
         analyzer = self.settings.LOCAL_ES_ANALYZER
         search_analyzer = self.settings.LOCAL_ES_SEARCH_ANALYZER
+        index_settings: dict = {
+            "number_of_shards": self.settings.LOCAL_ES_SHARDS,
+            "number_of_replicas": self.settings.LOCAL_ES_REPLICAS,
+        }
+        synonyms_path = self.settings.LOCAL_ES_SYNONYMS_PATH.strip()
+        if synonyms_path:
+            synonym_tokenizer = (
+                self.settings.LOCAL_ES_SYNONYM_TOKENIZER.strip() or search_analyzer
+            )
+            search_analyzer = SYNONYM_SEARCH_ANALYZER_NAME
+            index_settings["analysis"] = {
+                "filter": {
+                    SYNONYM_FILTER_NAME: {
+                        "type": "synonym_graph",
+                        "synonyms_path": synonyms_path,
+                        "updateable": True,
+                        "lenient": False,
+                    }
+                },
+                "analyzer": {
+                    SYNONYM_SEARCH_ANALYZER_NAME: {
+                        "type": "custom",
+                        "tokenizer": synonym_tokenizer,
+                        "filter": ["lowercase", SYNONYM_FILTER_NAME],
+                    }
+                },
+            }
         text_field = {
             "type": "text",
             "analyzer": analyzer,
             "search_analyzer": search_analyzer,
         }
         return {
-            "settings": {
-                "number_of_shards": self.settings.LOCAL_ES_SHARDS,
-                "number_of_replicas": self.settings.LOCAL_ES_REPLICAS,
-            },
+            "settings": index_settings,
             "mappings": {
                 "properties": {
                     "doc_id": {"type": "keyword"},

@@ -169,6 +169,7 @@
                 <div>
                   <strong>1. 全局候选</strong>
                   <code>candidates = ES Top-K ∪ FAISS Top-K</code>
+                  <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
                   <code>FAISS candidate 仅在 vector_score &gt;= FAISS_SCORE_THRESHOLD 时保留</code>
                 </div>
                 <div>

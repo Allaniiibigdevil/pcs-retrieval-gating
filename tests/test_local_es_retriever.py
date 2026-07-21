@@ -44,6 +44,10 @@ def test_local_es_retriever_uses_highlight_for_matched_keywords() -> None:
 
     assert retriever.request_body is not None
     assert "search_text" not in " ".join(retriever.fields)
+    multi_match = retriever.request_body["query"]["multi_match"]
+    assert multi_match["type"] == "cross_fields"
+    assert multi_match["operator"] == "or"
+    assert multi_match["minimum_should_match"] == "1<2"
     assert retriever.request_body["highlight"]["fields"]["keywords"] == {"number_of_fragments": 0}
     assert hits[0].metadata["matched_keywords"] == ["海鲜过敏"]
     assert hits[0].metadata["highlight"]["summary"] == ["记录了用户对<em>海鲜</em>过敏"]

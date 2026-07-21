@@ -27,8 +27,9 @@ class LocalElasticsearchRetriever:
                     "multi_match": {
                         "query": query,
                         "fields": self.fields,
-                        "type": "best_fields",
+                        "type": "cross_fields",
                         "operator": "or",
+                        "minimum_should_match": "1<2",
                     }
                 },
                 "size": top_k,
