@@ -1,16 +1,9 @@
 from pydantic import BaseModel, Field
 
-from app.config import get_settings
-
 
 class DecideRequest(BaseModel):
     task_id: str | None = None
     task: str
-    top_k_docs: int = Field(
-        default_factory=lambda: get_settings().DEFAULT_TOP_K_DOCS,
-        ge=1,
-        le=1000,
-    )
 
 
 class EvidenceDoc(BaseModel):

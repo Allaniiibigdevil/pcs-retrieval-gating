@@ -34,11 +34,8 @@ class DecisionEngine:
         self,
         task: str,
         task_id: str | None = None,
-        top_k_docs: int | None = None,
     ) -> DecideResponse:
-        effective_top_k = (
-            get_settings().DEFAULT_TOP_K_DOCS if top_k_docs is None else top_k_docs
-        )
+        effective_top_k = get_settings().DEFAULT_TOP_K_DOCS
         logger.info("decision_started task_id=%s top_k=%d", task_id, effective_top_k)
         timer = StageTimer()
         bm25_query = self.normalizer.normalize(task)

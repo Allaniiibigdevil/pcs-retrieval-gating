@@ -123,8 +123,8 @@
           <div class="settings-layout">
             <section class="settings-card">
               <div class="section-title">
-                <span class="step">请求</span>
-                <h2>请求规模</h2>
+                <span class="step">后端</span>
+                <h2>召回规模</h2>
               </div>
               <div class="field-row">
                 <label for="apiBaseInput">API Base</label>
@@ -134,7 +134,7 @@
               <div class="field-row">
                 <label for="topKInput">DEFAULT_TOP_K_DOCS</label>
                 <input id="topKInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：50。ES 和 FAISS 各自执行一次全局 Top-K 召回。</p>
+                <p>默认值：50。仅通过后端 `.env` 配置，ES 和 FAISS 各自执行一次全局 Top-K 召回。</p>
               </div>
             </section>
 

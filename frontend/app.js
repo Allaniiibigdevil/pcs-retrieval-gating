@@ -116,10 +116,7 @@ async function postDecide(task) {
   const response = await fetch(`${state.settings.apiBase.replace(/\/$/, "")}/v1/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      task,
-      top_k_docs: Number(state.settings.topKDocs),
-    }),
+    body: JSON.stringify({ task }),
   });
 
   if (!response.ok) {

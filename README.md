@@ -229,8 +229,11 @@ curl -X POST http://127.0.0.1:8000/v1/search/vector ^
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/decide ^
   -H "Content-Type: application/json" ^
-  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50}"
+  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\"}"
 ```
+
+`/v1/decide` 不接受请求级 Top-K 覆盖；ES 和 FAISS 的召回数量统一由后端
+`DEFAULT_TOP_K_DOCS` 配置控制。调试检索接口 `/v1/search/*` 仍支持请求级 `top_k`。
 
 返回示例：
 
