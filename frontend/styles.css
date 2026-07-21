@@ -281,7 +281,14 @@ h2 {
 
 .composer-actions {
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-end;
+}
+
+.composer-hint {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 textarea,

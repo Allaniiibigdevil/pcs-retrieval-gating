@@ -39,6 +39,7 @@ class DecisionEngine:
         effective_top_k = (
             get_settings().DEFAULT_TOP_K_DOCS if top_k_docs is None else top_k_docs
         )
+        logger.info("decision_started task_id=%s top_k=%d", task_id, effective_top_k)
         timer = StageTimer()
         bm25_query = self.normalizer.normalize(task)
         vector_query = task
@@ -53,18 +54,18 @@ class DecisionEngine:
             bm25_hits = await self.keyword_retriever.search(bm25_query, effective_top_k)
         except Exception as exc:
             keyword_error = exc
-            logger.exception("keyword_search_failed", extra={"task_id": task_id})
+            logger.exception("keyword_search_failed task_id=%s", task_id)
         timer.mark("keyword_search")
 
         try:
             vector_hits = await self.vector_retriever.search(vector_query, effective_top_k)
         except Exception as exc:
             vector_error = exc
-            logger.exception("vector_search_failed", extra={"task_id": task_id})
+            logger.exception("vector_search_failed task_id=%s", task_id)
         timer.mark("vector_search")
 
         if keyword_error is not None and vector_error is not None:
-            logger.error("decision_failed", extra={"task_id": task_id})
+            logger.error("decision_failed task_id=%s", task_id)
             raise RuntimeError("Both ES and vector search failed") from vector_error
 
         candidates = self.merger.merge(bm25_hits, vector_hits)
@@ -76,15 +77,14 @@ class DecisionEngine:
         latency_ms = timer.finish()
 
         logger.info(
-            "decision_completed",
-            extra={
-                "task_id": task_id,
-                "bm25_hit_count": len(bm25_hits),
-                "vector_hit_count": len(vector_hits),
-                "merged_candidate_count": len(candidates),
-                "selected_systems": selected_systems,
-                "latency_ms": latency_ms,
-            },
+            "decision_completed task_id=%s bm25_hits=%d vector_hits=%d "
+            "merged_candidates=%d selected_systems=%s latency_ms=%s",
+            task_id,
+            len(bm25_hits),
+            len(vector_hits),
+            len(candidates),
+            selected_systems,
+            latency_ms,
         )
         return DecideResponse(
             task_id=task_id,

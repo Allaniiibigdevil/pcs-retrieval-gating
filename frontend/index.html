@@ -49,8 +49,13 @@
                 <h2>用户问题</h2>
               </div>
               <form class="composer" id="decideForm">
-                <textarea id="taskInput" rows="5" placeholder="例如：我可以吃海鲜吗？"></textarea>
+                <textarea
+                  id="taskInput"
+                  rows="5"
+                  placeholder="例如：我可以吃海鲜吗？（Enter 发送，Ctrl+Enter 换行）"
+                ></textarea>
                 <div class="composer-actions">
+                  <span class="composer-hint">Enter 发送 · Ctrl+Enter 换行</span>
                   <button class="primary-button" type="submit">生成候选系统</button>
                 </div>
               </form>

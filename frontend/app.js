@@ -20,6 +20,8 @@ const latencyText = document.querySelector("#latencyText");
 const docsGrid = document.querySelector("#docsGrid");
 const docsFilterInput = document.querySelector("#docsFilterInput");
 const jsonlExample = document.querySelector("#jsonlExample");
+const decideForm = document.querySelector("#decideForm");
+const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
@@ -291,16 +293,15 @@ navItems.forEach((item) => {
   item.addEventListener("click", () => switchView(item.dataset.view));
 });
 
-document.querySelector("#decideForm").addEventListener("submit", async (event) => {
+decideForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const input = document.querySelector("#taskInput");
-  const task = input.value.trim();
+  const task = taskInput.value.trim();
   if (!task) {
     return;
   }
 
   addMessage("user", task);
-  input.value = "";
+  taskInput.value = "";
   addMessage("assistant", "生成中...");
 
   try {
@@ -313,6 +314,26 @@ document.querySelector("#decideForm").addEventListener("submit", async (event) =
     messageList.lastElementChild.textContent = `请求失败：${error.message}`;
     systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
   }
+});
+
+taskInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) {
+    return;
+  }
+
+  if (event.ctrlKey) {
+    event.preventDefault();
+    taskInput.setRangeText(
+      "\n",
+      taskInput.selectionStart,
+      taskInput.selectionEnd,
+      "end",
+    );
+    return;
+  }
+
+  event.preventDefault();
+  decideForm.requestSubmit();
 });
 
 document.querySelector("#docsFileInput").addEventListener("change", async (event) => {

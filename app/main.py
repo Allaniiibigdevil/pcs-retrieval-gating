@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -6,8 +5,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import decision, search
 from app.config import get_settings
+from app.logging_config import configure_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging()
 
 settings = get_settings()
 app = FastAPI(title=settings.APP_NAME)
