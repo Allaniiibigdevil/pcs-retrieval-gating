@@ -413,6 +413,35 @@ input:focus {
   gap: 6px 14px;
 }
 
+.reranker-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  border: 1px solid rgba(199, 0, 11, 0.2);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  padding: 8px 10px;
+}
+
+.reranker-result strong {
+  color: var(--accent-dark);
+}
+
+.retrieval-debug {
+  margin-top: 8px;
+}
+
+.retrieval-debug summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.retrieval-debug .retrieval-scores {
+  margin-top: 6px;
+}
+
 .retrieval-ranks {
   margin-top: 4px;
 }

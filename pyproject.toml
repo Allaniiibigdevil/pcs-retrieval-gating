@@ -9,11 +9,12 @@ dependencies = [
     "pydantic-settings",
     "numpy",
     "python-dotenv",
-    "huggingface-hub>=1.22.0",
+    "huggingface-hub",
     "sentence-transformers",
     "torch",
-    "transformers>=4.36.0",
+    "transformers>=4.41.0,<5.0.0",
     "faiss-cpu",
+    "pandas>=3.0.4",
 ]
 
 [project.optional-dependencies]

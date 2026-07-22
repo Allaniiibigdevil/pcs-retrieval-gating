@@ -53,6 +53,11 @@ function formatNumber(value) {
   return Number(value).toFixed(4);
 }
 
+function formatRank(value) {
+  const rank = Number(value);
+  return Number.isInteger(rank) && rank > 0 ? `#${rank}` : "-";
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -159,16 +164,21 @@ function renderDecision(data) {
                 ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
               </div>
               <div class="doc-meta">
-                <div class="retrieval-scores">
-                  <span>Reranker 分数 <strong>${formatNumber(doc.reranker_score)}</strong></span>
-                  <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
-                  <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
+                <div class="reranker-result">
+                  <span>最终 Reranker 分数 <strong>${formatNumber(doc.reranker_score)}</strong></span>
+                  <span>最终 Reranker 排名 <strong>${formatRank(doc.reranker_rank)}</strong></span>
                 </div>
-                <div class="retrieval-ranks">
-                  <span>Reranker 排名 <strong>#${doc.reranker_rank}</strong></span>
-                  <span>BM25 排名 <strong>${doc.bm25_rank ? `#${doc.bm25_rank}` : "未召回"}</strong></span>
-                  <span>FAISS 排名 <strong>${doc.vector_rank ? `#${doc.vector_rank}` : "未召回"}</strong></span>
-                </div>
+                <details class="retrieval-debug">
+                  <summary>粗召回信号（不参与最终排名）</summary>
+                  <div class="retrieval-scores">
+                    <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
+                    <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
+                  </div>
+                  <div class="retrieval-ranks">
+                    <span>BM25 排名 <strong>${doc.bm25_rank ? formatRank(doc.bm25_rank) : "未召回"}</strong></span>
+                    <span>FAISS 排名 <strong>${doc.vector_rank ? formatRank(doc.vector_rank) : "未召回"}</strong></span>
+                  </div>
+                </details>
               </div>
             </article>
           `,

@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Retrieval Gating Console</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <title>Retrieval Gating · Reranker Console</title>
+    <link rel="stylesheet" href="./styles.css?v=reranker-v2" />
   </head>
   <body>
     <div class="app-shell">
@@ -188,7 +188,7 @@
             <section class="formula-card">
               <div class="section-title">
                 <span class="step">公式</span>
-                <h2>当前 Reranker 选择逻辑</h2>
+                <h2>Reranker 最终评分与系统选择</h2>
               </div>
               <div class="formula-flow">
                 <div>
@@ -206,17 +206,18 @@
                 <div>
                   <strong>3. Cross-Encoder 精排</strong>
                   <code>C = bounded(E ∪ V, RERANKER_MAX_CANDIDATES)</code>
-                  <code>logit(doc) = GTE(query, keywords + summary)</code>
-                  <code>reranker_score(doc) = sigmoid(logit(doc))</code>
+                  <code>zᵢ = GTE(query, keywordsᵢ + summaryᵢ)</code>
+                  <code>sᵢ = sigmoid(zᵢ) = 1 / (1 + exp(-zᵢ))</code>
+                  <code>reranker_rank(dᵢ) = rank_desc(sᵢ)</code>
                 </div>
                 <div>
                   <strong>4. 系统选择</strong>
-                  <code>system_score = max(reranker_score(doc) of docs in this system)</code>
-                  <code>selected = system_score &gt;= RERANKER_SCORE_THRESHOLD</code>
+                  <code>Score(S) = max { sᵢ | dᵢ ∈ C and system(dᵢ) = S }</code>
+                  <code>Selected(S) = 1[Score(S) &gt;= RERANKER_SCORE_THRESHOLD]</code>
                 </div>
               </div>
               <div class="formula-note">
-                <p><strong>核心含义：</strong>BM25 和向量分数只用于召回与观察，不进入最终加权。GTE 只读取 query、keywords 和 summary，不读取 system_id。system 使用最佳文档，不做多文档求和，也不强制返回固定数量。</p>
+                <p><strong>核心含义：</strong>最终文档分数和排名只由 GTE reranker 产生。BM25 与 FAISS 只负责召回候选并作为调试信号，不进入最终加权。system 使用最佳文档的 reranker 分数，不做多文档求和，也不强制返回固定数量。</p>
               </div>
             </section>
 
@@ -235,6 +236,6 @@
       </main>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=reranker-v2"></script>
   </body>
 </html>
