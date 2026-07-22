@@ -27,8 +27,6 @@ class Settings(BaseSettings):
     LOCAL_ES_INDEX: str = "pcs_retrieval_docs"
     LOCAL_ES_ANALYZER: str = "standard"
     LOCAL_ES_SEARCH_ANALYZER: str = "standard"
-    LOCAL_ES_SYNONYMS_PATH: str = ""
-    LOCAL_ES_SYNONYM_TOKENIZER: str = ""
     LOCAL_ES_SHARDS: int = 1
     LOCAL_ES_REPLICAS: int = 0
     LOCAL_ES_TIMEOUT_SECONDS: int = 10
