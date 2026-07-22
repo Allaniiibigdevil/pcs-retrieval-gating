@@ -1,9 +1,6 @@
 import pytest
 
-from app.decision.system_aggregator import (
-    SystemAggregator,
-    reciprocal_rank_fusion_score,
-)
+from app.decision.system_aggregator import SystemAggregator
 from app.schemas.search import SearchHit
 
 
@@ -11,8 +8,8 @@ def hit(
     doc_id: str,
     system_id: str,
     *,
-    bm25_rank: int | None = None,
-    vector_rank: int | None = None,
+    reranker_score: float,
+    reranker_rank: int,
     bm25_score: float | None = None,
     vector_score: float | None = None,
     matched_keywords: list[str] | None = None,
@@ -22,65 +19,59 @@ def hit(
         system_id=system_id,
         summary=f"{doc_id} summary",
         keywords=matched_keywords or [],
-        bm25_rank=bm25_rank,
-        vector_rank=vector_rank,
         bm25_score=bm25_score,
         vector_score=vector_score,
+        reranker_score=reranker_score,
+        reranker_rank=reranker_rank,
         metadata={"matched_keywords": matched_keywords or []},
     )
 
 
-def test_rrf_score_uses_available_es_and_vector_ranks() -> None:
-    shared = hit("shared", "memo", bm25_rank=1, vector_rank=2)
-    es_only = hit("es", "memo", bm25_rank=3)
-    no_rank = hit("none", "memo")
-
-    assert reciprocal_rank_fusion_score(shared, 20) == pytest.approx(1 / 21 + 1 / 22)
-    assert reciprocal_rank_fusion_score(es_only, 20) == pytest.approx(1 / 23)
-    assert reciprocal_rank_fusion_score(no_rank, 20) == 0.0
-
-
-def test_global_rrf_top_docs_select_their_systems() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=2)
+def test_one_relevant_document_selects_its_system() -> None:
+    aggregator = SystemAggregator(score_threshold=0.7)
     decisions = aggregator.aggregate(
         [
-            hit("shared", "memo", bm25_rank=1, vector_rank=2),
-            hit("vector_first", "album", vector_rank=1),
-            hit("es_third", "todo", bm25_rank=3),
+            hit("relevant", "memo", reranker_score=0.91, reranker_rank=1),
+            hit("irrelevant", "memo", reranker_score=0.12, reranker_rank=3),
+            hit("album", "album", reranker_score=0.69, reranker_rank=2),
         ]
     )
 
     by_system = {decision.system_id: decision for decision in decisions}
-    assert by_system["memo"].rrf_score == pytest.approx(1 / 21 + 1 / 22)
     assert by_system["memo"].selected is True
-    assert by_system["album"].rrf_score == pytest.approx(1 / 21)
-    assert by_system["album"].selected is True
-    assert by_system["todo"].rrf_score == pytest.approx(1 / 23)
-    assert by_system["todo"].selected is False
+    assert by_system["memo"].reranker_score == 0.91
+    assert by_system["album"].selected is False
+    assert by_system["album"].reranker_score == 0.69
 
 
 def test_system_score_is_best_document_not_sum() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=1)
+    aggregator = SystemAggregator(score_threshold=0.8)
     decisions = aggregator.aggregate(
         [
-            hit("es_first", "memo", bm25_rank=1),
-            hit("vector_second", "memo", vector_rank=2),
+            hit("first", "memo", reranker_score=0.61, reranker_rank=1),
+            hit("second", "memo", reranker_score=0.60, reranker_rank=2),
         ]
     )
 
-    assert len(decisions) == 1
-    assert decisions[0].selected is True
-    assert decisions[0].rrf_score == pytest.approx(1 / 21, abs=1e-6)
-    assert [doc.doc_id for doc in decisions[0].evidence_docs] == [
-        "es_first",
-        "vector_second",
-    ]
+    assert decisions[0].selected is False
+    assert decisions[0].reranker_score == 0.61
 
 
-def test_system_aggregator_limits_evidence_to_three_documents() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=10)
+def test_system_aggregator_limits_evidence_documents() -> None:
+    aggregator = SystemAggregator(
+        score_threshold=0.5,
+        evidence_docs_per_system=3,
+    )
     decisions = aggregator.aggregate(
-        [hit(f"doc-{rank}", "memo", bm25_rank=rank) for rank in range(1, 5)]
+        [
+            hit(
+                f"doc-{rank}",
+                "memo",
+                reranker_score=1.0 - rank / 10,
+                reranker_rank=rank,
+            )
+            for rank in range(1, 5)
+        ]
     )
 
     assert [doc.doc_id for doc in decisions[0].evidence_docs] == [
@@ -90,15 +81,15 @@ def test_system_aggregator_limits_evidence_to_three_documents() -> None:
     ]
 
 
-def test_system_aggregator_exposes_doc_scores_keywords_and_highlight() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=10)
+def test_system_aggregator_exposes_retrieval_and_reranker_signals() -> None:
+    aggregator = SystemAggregator(score_threshold=0.5)
     source = hit(
         "allergy",
         "notepad",
+        reranker_score=0.93,
+        reranker_rank=1,
         bm25_score=3.0,
-        bm25_rank=1,
         vector_score=0.8,
-        vector_rank=2,
         matched_keywords=["海鲜过敏"],
     )
     source.metadata["highlight"] = {
@@ -110,33 +101,30 @@ def test_system_aggregator_exposes_doc_scores_keywords_and_highlight() -> None:
 
     assert evidence.keywords == ["海鲜过敏"]
     assert evidence.matched_keywords == ["海鲜过敏"]
-    assert evidence.rrf_score == pytest.approx(1 / 21 + 1 / 22, abs=1e-6)
-    assert evidence.rrf_rank == 1
+    assert evidence.bm25_score == 3.0
+    assert evidence.vector_score == 0.8
+    assert evidence.reranker_score == 0.93
+    assert evidence.reranker_rank == 1
     assert evidence.highlight == {
         "summary": ["记录了用户对<em>海鲜</em>过敏"],
         "keywords": ["<em>海鲜过敏</em>"],
     }
 
 
-def test_system_aggregator_exposes_global_rrf_rank() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=10)
-    decisions = aggregator.aggregate(
-        [
-            hit("shared", "memo", bm25_rank=1, vector_rank=2),
-            hit("vector_first", "album", vector_rank=1),
-            hit("es_third", "todo", bm25_rank=3),
-        ]
-    )
-
-    ranks = {
-        doc.doc_id: doc.rrf_rank
-        for decision in decisions
-        for doc in decision.evidence_docs
-    }
-    assert ranks == {"shared": 1, "vector_first": 2, "es_third": 3}
-
-
-@pytest.mark.parametrize("kwargs", [{"rrf_k": 0}, {"top_n_docs": 0}])
-def test_system_aggregator_rejects_invalid_configuration(kwargs: dict[str, int]) -> None:
+@pytest.mark.parametrize(
+    ("score_threshold", "evidence_docs_per_system"),
+    [
+        (-0.1, 3),
+        (1.1, 3),
+        (0.5, 0),
+    ],
+)
+def test_system_aggregator_rejects_invalid_configuration(
+    score_threshold: float,
+    evidence_docs_per_system: int,
+) -> None:
     with pytest.raises(ValueError):
-        SystemAggregator(**kwargs)
+        SystemAggregator(
+            score_threshold=score_threshold,
+            evidence_docs_per_system=evidence_docs_per_system,
+        )

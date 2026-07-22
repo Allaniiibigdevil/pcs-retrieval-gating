@@ -16,14 +16,14 @@ class EvidenceDoc(BaseModel):
     vector_score: float | None = None
     bm25_rank: int | None = None
     vector_rank: int | None = None
-    rrf_score: float
-    rrf_rank: int
+    reranker_score: float
+    reranker_rank: int
 
 
 class SystemDecision(BaseModel):
     system_id: str
     selected: bool
-    rrf_score: float
+    reranker_score: float
     evidence_docs: list[EvidenceDoc]
 
 

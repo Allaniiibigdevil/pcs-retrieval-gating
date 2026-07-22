@@ -4,7 +4,8 @@ from app.config import get_settings
 from app.decision.evidence_builder import EvidenceBuilder
 from app.decision.query_normalizer import QueryNormalizer
 from app.decision.system_aggregator import SystemAggregator
-from app.retrieval.candidate_merger import CandidateMerger
+from app.reranking.factory import Reranker, get_reranker
+from app.retrieval.candidate_selector import AdaptiveCandidateSelector
 from app.retrieval.factory import Retriever, get_keyword_retriever, get_vector_retriever
 from app.schemas.decision import DecideResponse
 from app.schemas.search import SearchHit
@@ -19,14 +20,16 @@ class DecisionEngine:
         normalizer: QueryNormalizer | None = None,
         keyword_retriever: Retriever | None = None,
         vector_retriever: Retriever | None = None,
-        merger: CandidateMerger | None = None,
+        candidate_selector: AdaptiveCandidateSelector | None = None,
+        reranker: Reranker | None = None,
         evidence_builder: EvidenceBuilder | None = None,
         aggregator: SystemAggregator | None = None,
     ) -> None:
         self.normalizer = normalizer or QueryNormalizer()
         self.keyword_retriever = keyword_retriever or get_keyword_retriever()
         self.vector_retriever = vector_retriever or get_vector_retriever()
-        self.merger = merger or CandidateMerger()
+        self.candidate_selector = candidate_selector or AdaptiveCandidateSelector()
+        self.reranker = reranker or get_reranker()
         self.evidence_builder = evidence_builder or EvidenceBuilder()
         self.aggregator = aggregator or SystemAggregator()
 
@@ -65,21 +68,26 @@ class DecisionEngine:
             logger.error("decision_failed task_id=%s", task_id)
             raise RuntimeError("Both ES and vector search failed") from vector_error
 
-        candidates = self.merger.merge(bm25_hits, vector_hits)
-        timer.mark("merge")
-        evidence_docs = self.evidence_builder.build(task, candidates)
-        decisions = self.aggregator.aggregate(evidence_docs)
+        selection = self.candidate_selector.select(bm25_hits, vector_hits)
+        timer.mark("candidate_select")
+        evidence_docs = self.evidence_builder.build(task, selection.candidates)
+        reranked_docs = await self.reranker.rerank(task, evidence_docs)
+        timer.mark("rerank")
+        decisions = self.aggregator.aggregate(reranked_docs)
         selected_systems = [item.system_id for item in decisions if item.selected]
         timer.mark("aggregate")
         latency_ms = timer.finish()
 
         logger.info(
             "decision_completed task_id=%s bm25_hits=%d vector_hits=%d "
-            "merged_candidates=%d selected_systems=%s latency_ms=%s",
+            "vector_candidates=%d reranker_candidates=%d "
+            "effective_vector_threshold=%s selected_systems=%s latency_ms=%s",
             task_id,
             len(bm25_hits),
             len(vector_hits),
-            len(candidates),
+            len(selection.vector_candidates),
+            len(selection.candidates),
+            selection.effective_vector_threshold,
             selected_systems,
             latency_ms,
         )

@@ -17,6 +17,9 @@ class SearchHit(BaseModel):
     vector_score: float | None = None
     vector_rank: int | None = None
 
+    reranker_score: float | None = None
+    reranker_rank: int | None = None
+
 
 class SearchRequest(BaseModel):
     query: str

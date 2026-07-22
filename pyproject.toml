@@ -11,6 +11,8 @@ dependencies = [
     "python-dotenv",
     "huggingface-hub>=1.22.0",
     "sentence-transformers",
+    "torch",
+    "transformers>=4.36.0",
     "faiss-cpu",
 ]
 

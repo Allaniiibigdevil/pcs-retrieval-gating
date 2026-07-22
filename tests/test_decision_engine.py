@@ -3,6 +3,7 @@ import pytest
 from app.config import get_settings
 from app.decision.decision_engine import DecisionEngine
 from app.decision.system_aggregator import SystemAggregator
+from app.reranking.gte_reranker import attach_reranker_scores
 from app.schemas.search import SearchHit
 
 
@@ -17,8 +18,25 @@ class FakeRetriever:
         return self.hits
 
 
+class FakeReranker:
+    def __init__(self, scores: dict[str, float]) -> None:
+        self.scores = scores
+        self.calls: list[tuple[str, list[str]]] = []
+
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[SearchHit],
+    ) -> list[SearchHit]:
+        self.calls.append((query, [candidate.doc_id for candidate in candidates]))
+        return attach_reranker_scores(
+            candidates,
+            [self.scores[candidate.doc_id] for candidate in candidates],
+        )
+
+
 @pytest.mark.asyncio
-async def test_decision_engine_returns_selected_systems() -> None:
+async def test_decision_engine_reranks_candidates_and_selects_systems() -> None:
     keyword_retriever = FakeRetriever([])
     vector_retriever = FakeRetriever(
         [
@@ -31,10 +49,12 @@ async def test_decision_engine_returns_selected_systems() -> None:
             )
         ]
     )
+    reranker = FakeReranker({"memo_1": 0.91})
     engine = DecisionEngine(
         keyword_retriever=keyword_retriever,
         vector_retriever=vector_retriever,
-        aggregator=SystemAggregator(rrf_k=20, top_n_docs=10),
+        reranker=reranker,
+        aggregator=SystemAggregator(score_threshold=0.7),
     )
 
     response = await engine.decide("我可以吃海鲜吗？")
@@ -42,6 +62,7 @@ async def test_decision_engine_returns_selected_systems() -> None:
     assert response.selected_systems == ["notepad"]
     assert response.decisions[0].system_id == "notepad"
     assert response.decisions[0].selected is True
-    assert response.decisions[0].rrf_score == pytest.approx(1 / 21, abs=1e-6)
+    assert response.decisions[0].reranker_score == 0.91
+    assert reranker.calls == [("我可以吃海鲜吗？", ["memo_1"])]
     assert keyword_retriever.requested_top_k == [get_settings().DEFAULT_TOP_K_DOCS]
     assert vector_retriever.requested_top_k == [get_settings().DEFAULT_TOP_K_DOCS]

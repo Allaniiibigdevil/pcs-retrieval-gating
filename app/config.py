@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,9 +41,29 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 512
 
     DEFAULT_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
-    FAISS_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
-    RRF_K: int = Field(default=20, ge=1)
-    RRF_TOP_N_DOCS: int = Field(default=10, ge=1)
+    FAISS_PREFERRED_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
+    FAISS_MIN_SCORE_THRESHOLD: float = Field(default=0.30, ge=-1.0, le=1.0)
+    FAISS_TARGET_HITS: int = Field(default=10, ge=1, le=1000)
+
+    RERANKER_MODEL_PATH: str = "Alibaba-NLP/gte-multilingual-reranker-base"
+    RERANKER_LOCAL_FILES_ONLY: bool = True
+    RERANKER_DEVICE: str = "auto"
+    RERANKER_BATCH_SIZE: int = Field(default=8, ge=1, le=256)
+    RERANKER_MAX_LENGTH: int = Field(default=512, ge=8, le=8192)
+    RERANKER_MAX_CANDIDATES: int = Field(default=30, ge=1, le=1000)
+    RERANKER_SCORE_THRESHOLD: float = Field(default=0.50, ge=0.0, le=1.0)
+    RERANKER_EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_retrieval_thresholds(self) -> "Settings":
+        if self.FAISS_MIN_SCORE_THRESHOLD > self.FAISS_PREFERRED_SCORE_THRESHOLD:
+            raise ValueError(
+                "FAISS_MIN_SCORE_THRESHOLD must not exceed "
+                "FAISS_PREFERRED_SCORE_THRESHOLD"
+            )
+        if self.FAISS_TARGET_HITS > self.DEFAULT_TOP_K_DOCS:
+            raise ValueError("FAISS_TARGET_HITS must not exceed DEFAULT_TOP_K_DOCS")
+        return self
 
 
 @lru_cache

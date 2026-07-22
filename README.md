@@ -5,9 +5,9 @@
 ```text
 用户任务
   -> ES / FAISS 全局召回文档
-  -> FAISS 相似度阈值过滤
-  -> RRF 融合两个文档排名
-  -> 全局 Top-N 文档映射到 system_id
+  -> 一次 FAISS 查询内自适应放宽向量候选阈值
+  -> GTE cross-encoder 对候选文档统一精排
+  -> 相关文档按阈值映射到 system_id
   -> 输出 selected_systems
 ```
 
@@ -32,6 +32,7 @@
 - 文档通过离线命令灌入和建索引。
 - 词法检索使用本地 Elasticsearch。
 - 向量检索使用本地 FAISS artifact。
+- 文档相关度由本地 `gte-multilingual-reranker-base` 精排。
 - embedding 默认使用 `BAAI/bge-small-zh-v1.5`。
 - `/v1/decide` 的核心输出是 `selected_systems`。
 
@@ -94,9 +95,18 @@ LOCAL_ES_SYNONYM_TOKENIZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
 DEFAULT_TOP_K_DOCS=50
-FAISS_SCORE_THRESHOLD=0.60
-RRF_K=20
-RRF_TOP_N_DOCS=10
+FAISS_PREFERRED_SCORE_THRESHOLD=0.60
+FAISS_MIN_SCORE_THRESHOLD=0.30
+FAISS_TARGET_HITS=10
+
+RERANKER_MODEL_PATH=Alibaba-NLP/gte-multilingual-reranker-base
+RERANKER_LOCAL_FILES_ONLY=true
+RERANKER_DEVICE=auto
+RERANKER_BATCH_SIZE=8
+RERANKER_MAX_LENGTH=512
+RERANKER_MAX_CANDIDATES=30
+RERANKER_SCORE_THRESHOLD=0.50
+RERANKER_EVIDENCE_DOCS_PER_SYSTEM=3
 ```
 
 ## 查询处理
@@ -177,28 +187,69 @@ POST /pcs_retrieval_docs/_cache/clear?request=true
 
 ## 评分机制
 
-当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做 Reciprocal Rank Fusion。ES 与 FAISS 各自执行全局 Top-K 召回，FAISS 文档在进入融合前必须满足：
+当前实现不再使用 RRF，也不混合 BM25 `_score` 和向量相似度。ES 与 FAISS
+只负责产生候选；最终文档相关度由 GTE cross-encoder 计算。
+
+### 一次 FAISS 查询内自适应阈值
+
+FAISS 只执行一次 Top-K 查询，并先过滤掉低于安全下限的文档：
 
 ```text
-vector_score >= FAISS_SCORE_THRESHOLD
+V_raw = {doc in FAISS Top-K | vector_score >= FAISS_MIN_SCORE_THRESHOLD}
 ```
 
-同一个 `doc_id` 在两路候选中合并后，文档 RRF 分数为：
+设 `N = FAISS_TARGET_HITS`。如果优选阈值已经得到至少 N 篇文档，就使用优选
+阈值；否则把有效阈值降到第 N 名向量候选的分数，但不低于安全下限：
 
 ```text
-rrf(doc) =
-  I(doc in ES) / (RRF_K + es_rank)
-  + I(doc in FAISS) / (RRF_K + vector_rank)
+T_eff = FAISS_PREFERRED_SCORE_THRESHOLD
+        if count(vector_score >= FAISS_PREFERRED_SCORE_THRESHOLD) >= N
+        else max(FAISS_MIN_SCORE_THRESHOLD, score_of_Nth_available_vector_hit)
+
+V = {doc in V_raw | vector_score >= T_eff}
 ```
 
-说明：
+如果安全下限以上本来就不足 N 篇，则保留全部可用向量候选，不会突破安全下限。
+这是对一次 FAISS 返回结果做逻辑截断，不会根据阈值反复调用 FAISS。
 
-- 某一路没有召回该文档时，该路贡献为 0。
-- `RRF_K` 控制排名位置差异；当前默认值 20，适合较浅的候选列表。
-- 全局按 `rrf(doc)` 排序后取 `RRF_TOP_N_DOCS` 篇文档，默认取前 10 篇。
-- 只要一个 system 至少有一篇文档进入全局 RRF Top-N，就进入 `selected_systems`。
-- system 的展示分数是该 system 最佳文档的 RRF 分数，不对多篇文档求和。
-- RRF 分数不是相关概率；空结果依赖 ES 无命中以及 FAISS 阈值过滤后无候选。
+ES 候选 `E` 和自适应向量候选 `V` 按 `doc_id` 合并。如果候选总数超过
+`RERANKER_MAX_CANDIDATES`，按 ES、FAISS 两路交替取未重复文档，避免某一路完全
+挤占精排预算。这里的路由排名只用于候选预算，不是最终分数。
+
+### GTE 精排与 system 选择
+
+默认从项目根目录加载：
+
+```text
+Alibaba-NLP/gte-multilingual-reranker-base
+```
+
+模型目录已加入 `.gitignore`。模型按第一次 `/v1/decide` 请求懒加载；
+`RERANKER_DEVICE=auto` 会优先使用 CUDA，否则使用 CPU。官方模型支持最长 8192
+tokens，当前为控制时延默认截断到 512，可通过 `RERANKER_MAX_LENGTH` 调整。
+
+每篇候选文档的输入只包含内容，不包含 `system_id`、BM25 分数、向量分数或两路排名：
+
+```text
+passage(doc) = "关键词：" + keywords + "\n摘要：" + summary
+raw_logit(doc) = GTE(query, passage(doc))
+reranker_score(doc) = sigmoid(raw_logit(doc))
+```
+
+按 `reranker_score` 做最终文档排名。system 使用其最佳文档做 max-pool：
+
+```text
+system_score(system) = max(reranker_score(doc) for doc in system)
+selected(system) = system_score(system) >= RERANKER_SCORE_THRESHOLD
+```
+
+因此，一个 system 只需一篇文档达到阈值即可选中；文档数量不会被累加成优势，也不
+强制返回固定数量的 system。sigmoid 分数便于统一到 0～1，但未经业务数据校准，不能
+解释为真实相关概率，阈值仍需用标注 case 调整。
+
+这里刻意不加入“BM25 高、向量低就降权”的手工规则。cross-encoder 已经负责判断
+关键词是否只是浅层重合；提前降权可能误伤姓名、编号、日期等词法精确但向量分不高的
+真实相关文档。两路原始分数仍保留在 API、前端和日志中，便于后续收集 hard negative。
 
 ## 离线灌入和建索引
 
@@ -310,7 +361,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
     {
       "system_id": "notepad",
       "selected": true,
-      "rrf_score": 0.095238,
+      "reranker_score": 0.93,
       "evidence_docs": [
         {
           "doc_id": "3",
@@ -325,8 +376,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
           "vector_score": 0.84,
           "bm25_rank": 1,
           "vector_rank": 1,
-          "rrf_score": 0.095238,
-          "rrf_rank": 1
+          "reranker_score": 0.93,
+          "reranker_rank": 1
         }
       ]
     }
@@ -339,10 +390,10 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 
 - `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
 - `decisions`：候选子系统的解释信息，用于调试和观察。
-- `selected`：该 system 是否至少有一篇文档进入全局 RRF Top-N。
-- `rrf_score`：该 system 最佳候选文档的 RRF 分数，不是概率。
+- `selected`：该 system 是否至少有一篇文档达到 reranker 阈值。
+- `reranker_score`：该 system 最佳候选文档的 sigmoid reranker 分数，不是已校准概率。
 - `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
-- `rrf_rank`：文档在合并候选中的全局 RRF 排名；前端与 BM25、FAISS 排名一起展示。
+- `reranker_rank`：文档在本次 cross-encoder 精排候选中的全局排名；前端与 BM25、FAISS 排名一起展示。
 
 ## 测试和检查
 
@@ -372,5 +423,5 @@ uv run python -m compileall app tests
 - 文档更新后需要重新运行离线索引构建。
 - 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
 - 向量检索使用原始 query，不做停用词删除。
-- 当前 scoring 使用 RRF 排名融合，不对 BM25 和向量原始分做加权。
+- 当前 scoring 只使用 GTE cross-encoder，不对 BM25 和向量原始分做加权。
 - 最终输出目标是子系统选择，不是文档排序。

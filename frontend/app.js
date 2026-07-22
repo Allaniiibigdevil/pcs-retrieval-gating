@@ -1,9 +1,14 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
   topKDocs: 50,
-  faissScoreThreshold: 0.6,
-  rrfK: 20,
-  rrfTopNDocs: 10,
+  faissPreferredThreshold: 0.6,
+  faissMinThreshold: 0.3,
+  faissTargetHits: 10,
+  rerankerModelPath: "Alibaba-NLP/gte-multilingual-reranker-base",
+  rerankerMaxCandidates: 30,
+  rerankerScoreThreshold: 0.5,
+  rerankerBatchSize: 8,
+  rerankerMaxLength: 512,
 };
 
 const state = {
@@ -25,7 +30,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v5") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v6") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -33,7 +38,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v5", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v6", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -131,7 +136,7 @@ function renderDecision(data) {
   selectedSummary.textContent = selected.length ? `选中：${selected.join(", ")}` : "未选中系统";
   selectedSummary.classList.toggle("has-selection", selected.length > 0);
 
-  const totalMs = Object.values(data.latency_ms || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  const totalMs = Number(data.latency_ms?.total || 0);
   latencyText.textContent = totalMs ? `${totalMs.toFixed(1)} ms` : "-";
 
   if (!data.decisions?.length) {
@@ -155,13 +160,14 @@ function renderDecision(data) {
               </div>
               <div class="doc-meta">
                 <div class="retrieval-scores">
+                  <span>Reranker 分数 <strong>${formatNumber(doc.reranker_score)}</strong></span>
                   <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
                   <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
                 </div>
                 <div class="retrieval-ranks">
+                  <span>Reranker 排名 <strong>#${doc.reranker_rank}</strong></span>
                   <span>BM25 排名 <strong>${doc.bm25_rank ? `#${doc.bm25_rank}` : "未召回"}</strong></span>
                   <span>FAISS 排名 <strong>${doc.vector_rank ? `#${doc.vector_rank}` : "未召回"}</strong></span>
-                  <span>RRF 排名 <strong>#${doc.rrf_rank}</strong></span>
                 </div>
               </div>
             </article>
@@ -172,7 +178,10 @@ function renderDecision(data) {
       return `
         <article class="system-card ${item.selected ? "selected" : ""}">
           <div class="system-topline">
-            <div class="system-name">${escapeHtml(item.system_id)}</div>
+            <div>
+              <div class="system-name">${escapeHtml(item.system_id)}</div>
+              <div class="system-score">最佳 Reranker 分数 ${formatNumber(item.reranker_score)}</div>
+            </div>
             <span class="badge ${item.selected ? "selected" : ""}">${item.selected ? "selected" : "candidate"}</span>
           </div>
           <div class="evidence">
@@ -240,9 +249,14 @@ function renderDocs() {
 function fillSettingsForm() {
   document.querySelector("#apiBaseInput").value = state.settings.apiBase;
   document.querySelector("#topKInput").value = state.settings.topKDocs;
-  document.querySelector("#faissScoreThresholdInput").value = state.settings.faissScoreThreshold;
-  document.querySelector("#rrfKInput").value = state.settings.rrfK;
-  document.querySelector("#rrfTopNDocsInput").value = state.settings.rrfTopNDocs;
+  document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
+  document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
+  document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
+  document.querySelector("#rerankerModelPathInput").value = state.settings.rerankerModelPath;
+  document.querySelector("#rerankerMaxCandidatesInput").value = state.settings.rerankerMaxCandidates;
+  document.querySelector("#rerankerScoreThresholdInput").value = state.settings.rerankerScoreThreshold;
+  document.querySelector("#rerankerBatchSizeInput").value = state.settings.rerankerBatchSize;
+  document.querySelector("#rerankerMaxLengthInput").value = state.settings.rerankerMaxLength;
   renderEnvPreview();
 }
 
@@ -250,12 +264,28 @@ function readSettingsForm() {
   state.settings = {
     apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
     topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
-    faissScoreThreshold: Number(
-      document.querySelector("#faissScoreThresholdInput").value || defaultSettings.faissScoreThreshold,
+    faissPreferredThreshold: Number(
+      document.querySelector("#faissPreferredThresholdInput").value || defaultSettings.faissPreferredThreshold,
     ),
-    rrfK: Number(document.querySelector("#rrfKInput").value || defaultSettings.rrfK),
-    rrfTopNDocs: Number(
-      document.querySelector("#rrfTopNDocsInput").value || defaultSettings.rrfTopNDocs,
+    faissMinThreshold: Number(
+      document.querySelector("#faissMinThresholdInput").value || defaultSettings.faissMinThreshold,
+    ),
+    faissTargetHits: Number(
+      document.querySelector("#faissTargetHitsInput").value || defaultSettings.faissTargetHits,
+    ),
+    rerankerModelPath:
+      document.querySelector("#rerankerModelPathInput").value.trim() || defaultSettings.rerankerModelPath,
+    rerankerMaxCandidates: Number(
+      document.querySelector("#rerankerMaxCandidatesInput").value || defaultSettings.rerankerMaxCandidates,
+    ),
+    rerankerScoreThreshold: Number(
+      document.querySelector("#rerankerScoreThresholdInput").value || defaultSettings.rerankerScoreThreshold,
+    ),
+    rerankerBatchSize: Number(
+      document.querySelector("#rerankerBatchSizeInput").value || defaultSettings.rerankerBatchSize,
+    ),
+    rerankerMaxLength: Number(
+      document.querySelector("#rerankerMaxLengthInput").value || defaultSettings.rerankerMaxLength,
     ),
   };
   saveSettingsDraft();
@@ -265,9 +295,17 @@ function readSettingsForm() {
 function buildEnvPreview() {
   return [
     `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
-    `FAISS_SCORE_THRESHOLD=${state.settings.faissScoreThreshold}`,
-    `RRF_K=${state.settings.rrfK}`,
-    `RRF_TOP_N_DOCS=${state.settings.rrfTopNDocs}`,
+    `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
+    `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
+    `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
+    `RERANKER_MODEL_PATH=${state.settings.rerankerModelPath}`,
+    "RERANKER_LOCAL_FILES_ONLY=true",
+    "RERANKER_DEVICE=auto",
+    `RERANKER_BATCH_SIZE=${state.settings.rerankerBatchSize}`,
+    `RERANKER_MAX_LENGTH=${state.settings.rerankerMaxLength}`,
+    `RERANKER_MAX_CANDIDATES=${state.settings.rerankerMaxCandidates}`,
+    `RERANKER_SCORE_THRESHOLD=${state.settings.rerankerScoreThreshold}`,
+    "RERANKER_EVIDENCE_DOCS_PER_SYSTEM=3",
   ].join("\n");
 }
 
@@ -366,7 +404,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #faissScoreThresholdInput, #rrfKInput, #rrfTopNDocsInput",
+    "#apiBaseInput, #topKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rerankerModelPathInput, #rerankerMaxCandidatesInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

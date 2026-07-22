@@ -94,8 +94,8 @@
             </div>
             <details class="jsonl-example" id="jsonlExample" open>
               <summary>JSONL 示例</summary>
-              <pre>{"doc_id":"1","system_id":"photo","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
-{"doc_id":"2","system_id":"photo","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{}}
+              <pre>{"doc_id":"1","system_id":"album","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
+{"doc_id":"2","system_id":"album","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{}}
 {"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{}}
 {"doc_id":"4","system_id":"notepad","summary":"记录了用户的身份证号码、银行卡号","keywords":["身份证","银行卡"],"metadata":{}}</pre>
             </details>
@@ -136,58 +136,87 @@
                 <input id="topKInput" type="number" min="1" max="200" step="1" />
                 <p>默认值：50。仅通过后端 `.env` 配置，ES 和 FAISS 各自执行一次全局 Top-K 召回。</p>
               </div>
+              <div class="field-row">
+                <label for="faissPreferredThresholdInput">FAISS_PREFERRED_SCORE_THRESHOLD</label>
+                <input id="faissPreferredThresholdInput" type="number" min="-1" max="1" step="0.01" />
+                <p>默认值：0.60。优先保留达到该相似度的向量候选。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissMinThresholdInput">FAISS_MIN_SCORE_THRESHOLD</label>
+                <input id="faissMinThresholdInput" type="number" min="-1" max="1" step="0.01" />
+                <p>默认值：0.30。自适应降低阈值时不可越过的安全下限。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissTargetHitsInput">FAISS_TARGET_HITS</label>
+                <input id="faissTargetHitsInput" type="number" min="1" max="200" step="1" />
+                <p>默认值：10。优选阈值下数量不足时，逻辑降低阈值以补足向量候选；不会再次请求 FAISS。</p>
+              </div>
             </section>
 
             <section class="settings-card">
               <div class="section-title">
-                <span class="step">融合</span>
-                <h2>RRF 参数</h2>
+                <span class="step">精排</span>
+                <h2>GTE Reranker</h2>
               </div>
               <div class="field-row">
-                <label for="faissScoreThresholdInput">FAISS_SCORE_THRESHOLD</label>
-                <input id="faissScoreThresholdInput" type="number" min="-1" max="1" step="0.01" />
-                <p>默认值：0.60。FAISS 文档低于该相似度时，在进入 RRF 前删除。</p>
+                <label for="rerankerModelPathInput">RERANKER_MODEL_PATH</label>
+                <input id="rerankerModelPathInput" type="text" />
+                <p>默认使用项目目录下的 `Alibaba-NLP/gte-multilingual-reranker-base`。</p>
               </div>
               <div class="field-row">
-                <label for="rrfKInput">RRF_K</label>
-                <input id="rrfKInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：20。数值越大，列表前后位置的差异越平缓，也越强调双路共同命中。</p>
+                <label for="rerankerMaxCandidatesInput">RERANKER_MAX_CANDIDATES</label>
+                <input id="rerankerMaxCandidatesInput" type="number" min="1" max="200" step="1" />
+                <p>默认值：30。精排的最大文档数；超出时按 ES、FAISS 两路交替保留候选。</p>
               </div>
               <div class="field-row">
-                <label for="rrfTopNDocsInput">RRF_TOP_N_DOCS</label>
-                <input id="rrfTopNDocsInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：10。最终选取的全局 RRF 文档数；这些文档所属的 system 全部进入结果。</p>
+                <label for="rerankerScoreThresholdInput">RERANKER_SCORE_THRESHOLD</label>
+                <input id="rerankerScoreThresholdInput" type="number" min="0" max="1" step="0.01" />
+                <p>默认值：0.50。一个 system 只要有一篇文档达到该值就被选中。</p>
+              </div>
+              <div class="field-row">
+                <label for="rerankerBatchSizeInput">RERANKER_BATCH_SIZE</label>
+                <input id="rerankerBatchSizeInput" type="number" min="1" max="256" step="1" />
+                <p>默认值：8。显存或内存充足时可增大以提高批处理吞吐。</p>
+              </div>
+              <div class="field-row">
+                <label for="rerankerMaxLengthInput">RERANKER_MAX_LENGTH</label>
+                <input id="rerankerMaxLengthInput" type="number" min="8" max="8192" step="8" />
+                <p>默认值：512。摘要更长时可提高，但会增加精排时延和内存占用。</p>
               </div>
             </section>
 
             <section class="formula-card">
               <div class="section-title">
                 <span class="step">公式</span>
-                <h2>当前 RRF 选择逻辑</h2>
+                <h2>当前 Reranker 选择逻辑</h2>
               </div>
               <div class="formula-flow">
                 <div>
                   <strong>1. 全局候选</strong>
-                  <code>candidates = ES Top-K ∪ FAISS Top-K</code>
+                  <code>E = ES Top-K</code>
+                  <code>V_raw = FAISS Top-K where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
                   <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
-                  <code>FAISS candidate 仅在 vector_score &gt;= FAISS_SCORE_THRESHOLD 时保留</code>
                 </div>
                 <div>
-                  <strong>2. 文档 RRF</strong>
-                  <code>rrf(doc) = I(ES)/(RRF_K + es_rank) + I(FAISS)/(RRF_K + vector_rank)</code>
+                  <strong>2. 向量候选自适应</strong>
+                  <code>T_eff = T_preferred；不足 N 条时降到第 N 名分数，但不低于 T_min</code>
+                  <code>V = {doc in V_raw | vector_score &gt;= T_eff}</code>
+                  <code>整个过程只执行一次 FAISS search</code>
                 </div>
                 <div>
-                  <strong>3. 文档截断</strong>
-                  <code>selected_docs = global Top RRF_TOP_N_DOCS by rrf(doc)</code>
+                  <strong>3. Cross-Encoder 精排</strong>
+                  <code>C = bounded(E ∪ V, RERANKER_MAX_CANDIDATES)</code>
+                  <code>logit(doc) = GTE(query, keywords + summary)</code>
+                  <code>reranker_score(doc) = sigmoid(logit(doc))</code>
                 </div>
                 <div>
                   <strong>4. 系统选择</strong>
-                  <code>system_rrf = max(rrf(doc) of docs in this system)</code>
-                  <code>selected = 该 system 至少有一篇文档进入 selected_docs</code>
+                  <code>system_score = max(reranker_score(doc) of docs in this system)</code>
+                  <code>selected = system_score &gt;= RERANKER_SCORE_THRESHOLD</code>
                 </div>
               </div>
               <div class="formula-note">
-                <p><strong>核心含义：</strong>RRF 只融合两个排序，不直接混合 BM25 和向量分数。system 使用最佳文档，不做多文档求和，也不强制返回固定数量的 system。</p>
+                <p><strong>核心含义：</strong>BM25 和向量分数只用于召回与观察，不进入最终加权。GTE 只读取 query、keywords 和 summary，不读取 system_id。system 使用最佳文档，不做多文档求和，也不强制返回固定数量。</p>
               </div>
             </section>
 
