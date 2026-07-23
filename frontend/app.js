@@ -5,6 +5,7 @@ const defaultSettings = {
   faissPreferredThreshold: 0.6,
   faissMinThreshold: 0.3,
   faissTargetHits: 10,
+  evidenceDocsPerSystem: 3,
   rrfK: 20,
   rrfTopNDocs: 10,
 };
@@ -12,6 +13,7 @@ const defaultSettings = {
 const state = {
   docs: [],
   settings: loadSettings(),
+  latestDecisionRequestId: 0,
 };
 
 const views = document.querySelectorAll(".view");
@@ -28,7 +30,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v6") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v7") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -36,7 +38,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v6", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v7", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -107,12 +109,40 @@ function renderKeywordBadges(keywords = [], matchedKeywords = [], highlight = {}
     .join("");
 }
 
-function addMessage(role, text) {
-  const node = document.createElement("div");
-  node.className = `message ${role}`;
-  node.textContent = text;
-  messageList.appendChild(node);
-  messageList.scrollTop = messageList.scrollHeight;
+function createQueryHistoryEntry(task) {
+  messageList.querySelector(".query-history-empty")?.remove();
+  const node = document.createElement("article");
+  node.className = "query-history-item pending";
+  node.innerHTML = `
+    <div class="query-history-label">用户问题</div>
+    <div class="query-history-question">${escapeHtml(task)}</div>
+    <div class="query-history-status">生成中...</div>
+    <div class="query-history-queries"></div>
+  `;
+  messageList.prepend(node);
+  messageList.scrollTop = 0;
+  return node;
+}
+
+function completeQueryHistoryEntry(node, data) {
+  const selected = data.selected_systems || [];
+  const queries = data.rewritten_queries?.length
+    ? data.rewritten_queries
+    : [data.task].filter(Boolean);
+  node.classList.remove("pending", "error");
+  node.querySelector(".query-history-status").textContent = selected.length
+    ? `建议检索：${selected.join(", ")}`
+    : "没有选中子系统";
+  node.querySelector(".query-history-queries").innerHTML = `
+    <div class="query-history-label">改写 Query</div>
+    <ol>${queries.map((query) => `<li>${escapeHtml(query)}</li>`).join("")}</ol>
+  `;
+}
+
+function failQueryHistoryEntry(node, error) {
+  node.classList.remove("pending");
+  node.classList.add("error");
+  node.querySelector(".query-history-status").textContent = `请求失败：${error.message}`;
 }
 
 async function postDecide(task) {
@@ -247,6 +277,7 @@ function fillSettingsForm() {
   document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
   document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
   document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
+  document.querySelector("#evidenceDocsPerSystemInput").value = state.settings.evidenceDocsPerSystem;
   document.querySelector("#rrfKInput").value = state.settings.rrfK;
   document.querySelector("#rrfTopNDocsInput").value = state.settings.rrfTopNDocs;
   renderEnvPreview();
@@ -266,6 +297,9 @@ function readSettingsForm() {
     faissTargetHits: Number(
       document.querySelector("#faissTargetHitsInput").value || defaultSettings.faissTargetHits,
     ),
+    evidenceDocsPerSystem: Number(
+      document.querySelector("#evidenceDocsPerSystemInput").value || defaultSettings.evidenceDocsPerSystem,
+    ),
     rrfK: Number(document.querySelector("#rrfKInput").value || defaultSettings.rrfK),
     rrfTopNDocs: Number(
       document.querySelector("#rrfTopNDocsInput").value || defaultSettings.rrfTopNDocs,
@@ -282,6 +316,7 @@ function buildEnvPreview() {
     `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
     `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
     `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
+    `EVIDENCE_DOCS_PER_SYSTEM=${state.settings.evidenceDocsPerSystem}`,
     `RRF_K=${state.settings.rrfK}`,
     `RRF_TOP_N_DOCS=${state.settings.rrfTopNDocs}`,
   ].join("\n");
@@ -313,19 +348,21 @@ decideForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  addMessage("user", task);
+  const requestId = ++state.latestDecisionRequestId;
+  const historyEntry = createQueryHistoryEntry(task);
   taskInput.value = "";
-  addMessage("assistant", "生成中...");
 
   try {
     const data = await postDecide(task);
-    messageList.lastElementChild.textContent = data.selected_systems?.length
-      ? `建议检索：${data.selected_systems.join(", ")}`
-      : "没有选中子系统";
-    renderDecision(data);
+    completeQueryHistoryEntry(historyEntry, data);
+    if (requestId === state.latestDecisionRequestId) {
+      renderDecision(data);
+    }
   } catch (error) {
-    messageList.lastElementChild.textContent = `请求失败：${error.message}`;
-    systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
+    failQueryHistoryEntry(historyEntry, error);
+    if (requestId === state.latestDecisionRequestId) {
+      systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
+    }
   }
 });
 
@@ -382,7 +419,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rrfKInput, #rrfTopNDocsInput",
+    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #evidenceDocsPerSystemInput, #rrfKInput, #rrfTopNDocsInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);
@@ -402,5 +439,5 @@ document.querySelector("#healthButton").addEventListener("click", checkHealth);
 fillSettingsForm();
 renderDocs();
 systemList.innerHTML = `<div class="empty-state">暂无候选系统</div>`;
-addMessage("assistant", "输入任务后生成候选系统。");
+messageList.innerHTML = `<div class="empty-state query-history-empty">暂无查询记录</div>`;
 checkHealth();

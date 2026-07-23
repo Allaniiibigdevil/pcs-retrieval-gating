@@ -4,7 +4,8 @@
 
 ```text
 用户任务
-  -> ES / FAISS 全局召回文档
+  -> query 改写列表
+  -> 所有 query 并行执行 ES / FAISS 召回
   -> FAISS 相似度阈值过滤
   -> RRF 融合两个文档排名
   -> 全局 Top-N 文档映射到 system_id
@@ -96,18 +97,26 @@ FAISS_TOP_K_DOCS=50
 FAISS_PREFERRED_SCORE_THRESHOLD=0.60
 FAISS_MIN_SCORE_THRESHOLD=0.30
 FAISS_TARGET_HITS=10
+EVIDENCE_DOCS_PER_SYSTEM=3
 RRF_K=20
 RRF_TOP_N_DOCS=10
 ```
 
 ## 查询处理
 
-ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做大小写归一化。
+`app/decision/query_rewriter.py` 当前默认返回 `[task]`，其中留有 TODO，可替换为
+自定义 query 改写并返回一条或多条 query。空白和重复 query 会被删除；如果结果
+为空则回退到原始 task。
+
+所有改写 query 的 ES 与 FAISS 检索并行执行。ES query 只合并多余空白，不删除
+停用词；FAISS 保留改写 query 的语义。相同文档被多条 query 召回时，ES 保留最佳
+查询排名，FAISS 保留最高向量分，再输出统一的渠道排名。
 
 原因：
 
-- ES 是词法检索，分词、大小写归一化、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
-- BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
+- ES 是词法检索，分词、大小写归一化、停用词和领域词配置应由 ES analyzer
+  统一承接，避免额外文本预处理导致 ES `_score` 难以复现。
+- BGE embedding 是语义检索，应该保留每条改写 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
 线上词法检索和优先证据关键词匹配由本地 ES 提供：ES 检索会请求 `keywords` / `summary` highlight，并优先使用 `keywords` highlight 生成 `matched_keywords`。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
@@ -116,9 +125,11 @@ ES 查询使用 `cross_fields` 将 `summary` 和 `keywords` 作为组合字段�
 
 ## 评分机制
 
-当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做 Reciprocal Rank Fusion。ES 与 FAISS 分别按 `ES_TOP_K_DOCS`、`FAISS_TOP_K_DOCS` 执行一次全局 Top-K 召回。
+当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做
+Reciprocal Rank Fusion。每条改写 query 分别按 `ES_TOP_K_DOCS`、
+`FAISS_TOP_K_DOCS` 执行一次召回。
 
-### 一次 FAISS 查询内自适应阈值
+### 每条改写 query 一次 FAISS 查询
 
 FAISS 首先过滤低于安全下限的文档：
 
@@ -137,7 +148,9 @@ T_eff = FAISS_PREFERRED_SCORE_THRESHOLD
 V = {doc in V_raw | vector_score >= T_eff}
 ```
 
-如果安全下限以上不足 N 篇，则保留全部可用候选。整个过程只处理一次 FAISS 返回结果，不会重复查询索引。达到优选阈值的文档可能多于 N；N 是不足时希望补到的数量，不是最大数量。
+如果安全下限以上不足 N 篇，则保留全部可用候选。阈值逻辑处理所有改写 query
+合并后的 FAISS hits，不会因为降低阈值重复查询索引。达到优选阈值的文档可能
+多于 N；N 是不足时希望补到的数量，不是最大数量。
 
 ### RRF 融合
 
@@ -264,6 +277,7 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 {
   "task_id": "task_001",
   "task": "我可以吃海鲜吗？",
+  "rewritten_queries": ["我可以吃海鲜吗？", "海鲜过敏记录"],
   "selected_systems": ["notepad"],
   "decisions": [
     {
@@ -297,10 +311,12 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
 字段含义：
 
 - `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
+- `rewritten_queries`：本次实际并行检索使用的去重后 query 列表。
 - `decisions`：候选子系统的解释信息，用于调试和观察。
 - `selected`：该 system 是否至少有一篇文档进入全局 RRF Top-N。
 - `rrf_score`：该 system 最佳候选文档的 RRF 分数，不是概率。
-- `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
+- `evidence_docs`：该系统下用于解释的证据文档，数量由
+  `EVIDENCE_DOCS_PER_SYSTEM` 控制，默认最多 3 篇。
 - `rrf_rank`：文档在合并候选中的全局 RRF 排名；前端与 BM25、FAISS 排名一起展示。
 
 ## 测试和检查
@@ -330,6 +346,6 @@ uv run python -m compileall app tests
 - 本地模式不提供实时文档写入接口。
 - 文档更新后需要重新运行离线索引构建。
 - 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
-- 向量检索使用原始 query，不做停用词删除。
+- 向量检索使用改写后的 query，不做停用词删除。
 - 当前 scoring 使用 RRF 排名融合，不对 BM25 和向量原始分做加权。
 - 最终输出目标是子系统选择，不是文档排序。

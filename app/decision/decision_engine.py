@@ -102,6 +102,7 @@ class DecisionEngine:
         return DecideResponse(
             task_id=task_id,
             task=task,
+            rewritten_queries=queries,
             selected_systems=selected_systems,
             decisions=decisions,
             latency_ms=latency_ms,

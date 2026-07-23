@@ -77,8 +77,12 @@ def test_system_score_is_best_document_not_sum() -> None:
     ]
 
 
-def test_system_aggregator_limits_evidence_to_three_documents() -> None:
-    aggregator = SystemAggregator(rrf_k=20, top_n_docs=10)
+def test_system_aggregator_limits_evidence_documents() -> None:
+    aggregator = SystemAggregator(
+        rrf_k=20,
+        top_n_docs=10,
+        evidence_docs_per_system=2,
+    )
     decisions = aggregator.aggregate(
         [hit(f"doc-{rank}", "memo", bm25_rank=rank) for rank in range(1, 5)]
     )
@@ -86,7 +90,6 @@ def test_system_aggregator_limits_evidence_to_three_documents() -> None:
     assert [doc.doc_id for doc in decisions[0].evidence_docs] == [
         "doc-1",
         "doc-2",
-        "doc-3",
     ]
 
 
@@ -136,7 +139,14 @@ def test_system_aggregator_exposes_global_rrf_rank() -> None:
     assert ranks == {"shared": 1, "vector_first": 2, "es_third": 3}
 
 
-@pytest.mark.parametrize("kwargs", [{"rrf_k": 0}, {"top_n_docs": 0}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"rrf_k": 0},
+        {"top_n_docs": 0},
+        {"evidence_docs_per_system": 0},
+    ],
+)
 def test_system_aggregator_rejects_invalid_configuration(kwargs: dict[str, int]) -> None:
     with pytest.raises(ValueError):
         SystemAggregator(**kwargs)

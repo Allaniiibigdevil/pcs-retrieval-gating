@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     FAISS_PREFERRED_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
     FAISS_MIN_SCORE_THRESHOLD: float = Field(default=0.30, ge=-1.0, le=1.0)
     FAISS_TARGET_HITS: int = Field(default=10, ge=1, le=1000)
+    EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
     RRF_K: int = Field(default=20, ge=1)
     RRF_TOP_N_DOCS: int = Field(default=10, ge=1)
 

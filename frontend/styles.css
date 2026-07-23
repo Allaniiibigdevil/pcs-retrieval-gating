@@ -316,22 +316,75 @@ input:focus {
 .message-list {
   display: grid;
   gap: 10px;
+  max-height: calc(100vh - 410px);
   margin-top: 18px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
-.message {
+.query-history-item {
+  border: 1px solid var(--line);
   border-radius: 8px;
+  background: var(--surface-soft);
   padding: 12px 14px;
   line-height: 1.55;
-  white-space: pre-wrap;
 }
 
-.message.user {
+.query-history-item:first-child {
+  border-color: rgba(199, 0, 11, 0.3);
   background: var(--accent-soft);
 }
 
-.message.assistant {
-  background: var(--surface-soft);
+.query-history-item.pending {
+  opacity: 0.76;
+}
+
+.query-history-item.error {
+  border-color: var(--warning-line);
+  background: var(--warning-bg);
+}
+
+.query-history-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.query-history-question {
+  margin-top: 3px;
+  font-weight: 800;
+  white-space: pre-wrap;
+}
+
+.query-history-status {
+  margin-top: 8px;
+  color: var(--accent-dark);
+  font-size: 13px;
+}
+
+.query-history-queries {
+  margin-top: 10px;
+}
+
+.query-history-queries:empty {
+  display: none;
+}
+
+.query-history-queries ol {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding-left: 22px;
+}
+
+.query-history-queries li {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.query-history-empty {
+  background: var(--accent-soft);
   color: var(--muted);
 }
 

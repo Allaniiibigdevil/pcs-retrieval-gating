@@ -42,14 +42,22 @@ class SystemAggregator:
         self,
         rrf_k: int | None = None,
         top_n_docs: int | None = None,
+        evidence_docs_per_system: int | None = None,
     ) -> None:
         settings = get_settings()
         self.rrf_k = settings.RRF_K if rrf_k is None else rrf_k
         self.top_n_docs = settings.RRF_TOP_N_DOCS if top_n_docs is None else top_n_docs
+        self.evidence_docs_per_system = (
+            settings.EVIDENCE_DOCS_PER_SYSTEM
+            if evidence_docs_per_system is None
+            else evidence_docs_per_system
+        )
         if self.rrf_k <= 0:
             raise ValueError("rrf_k must be greater than 0")
         if self.top_n_docs <= 0:
             raise ValueError("top_n_docs must be greater than 0")
+        if self.evidence_docs_per_system <= 0:
+            raise ValueError("evidence_docs_per_system must be greater than 0")
 
     def aggregate(self, evidence_docs: list[SearchHit]) -> list[SystemDecision]:
         scored_docs = [
@@ -70,7 +78,7 @@ class SystemAggregator:
         decisions: list[SystemDecision] = []
         for system_id, system_docs in grouped.items():
             system_docs.sort(key=_doc_sort_key)
-            evidence = system_docs[:3]
+            evidence = system_docs[: self.evidence_docs_per_system]
             decisions.append(
                 SystemDecision(
                     system_id=system_id,

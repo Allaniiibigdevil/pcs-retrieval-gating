@@ -44,6 +44,7 @@ async def test_decision_engine_returns_selected_systems(monkeypatch) -> None:
     response = await engine.decide("我可以吃海鲜吗？")
 
     assert response.selected_systems == ["notepad"]
+    assert response.rewritten_queries == ["我可以吃海鲜吗？"]
     assert response.decisions[0].system_id == "notepad"
     assert response.decisions[0].selected is True
     assert response.decisions[0].rrf_score == pytest.approx(1 / 21, abs=1e-6)
@@ -76,6 +77,7 @@ async def test_decision_engine_searches_all_rewritten_queries(monkeypatch) -> No
     response = await engine.decide("原始问题")
 
     assert response.task == "原始问题"
+    assert response.rewritten_queries == ["改写一", "改写二"]
     assert response.selected_systems == []
     assert keyword_retriever.requests == [("改写一", 7), ("改写二", 7)]
     assert vector_retriever.requests == [("改写一", 13), ("改写二", 13)]
