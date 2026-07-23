@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     LOCAL_ES_TIMEOUT_SECONDS: int = 10
     LOCAL_ES_INDEX_ON_BUILD: bool = False
     LOCAL_ES_SUMMARY_BOOST: float = 1.0
-    LOCAL_ES_KEYWORDS_BOOST: float = 3.0
+    LOCAL_ES_KEYWORDS_BOOST: float = 1.0
 
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"

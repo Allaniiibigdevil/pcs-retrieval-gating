@@ -43,6 +43,7 @@ def test_local_es_retriever_uses_highlight_for_matched_keywords() -> None:
     hits = asyncio.run(retriever.search("海鲜", top_k=5))
 
     assert retriever.request_body is not None
+    assert retriever.fields == ["summary^1.0", "keywords^1.0"]
     assert "search_text" not in " ".join(retriever.fields)
     multi_match = retriever.request_body["query"]["multi_match"]
     assert multi_match["type"] == "cross_fields"
