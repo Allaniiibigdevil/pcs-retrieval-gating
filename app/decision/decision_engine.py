@@ -3,12 +3,16 @@ import logging
 from app.config import get_settings
 from app.decision.evidence_builder import EvidenceBuilder
 from app.decision.query_normalizer import QueryNormalizer
+from app.decision.query_rewriter import prepare_queries, rewrite_queries
 from app.decision.system_aggregator import SystemAggregator
 from app.reranking.factory import Reranker, get_reranker
 from app.retrieval.candidate_selector import AdaptiveCandidateSelector
 from app.retrieval.factory import Retriever, get_keyword_retriever, get_vector_retriever
+from app.retrieval.parallel_query_retriever import (
+    ChannelSearchResult,
+    search_queries_in_parallel,
+)
 from app.schemas.decision import DecideResponse
-from app.schemas.search import SearchHit
 from app.utils.timing import StageTimer
 
 logger = logging.getLogger(__name__)
@@ -48,32 +52,29 @@ class DecisionEngine:
             faiss_top_k,
         )
         timer = StageTimer()
-        bm25_query = self.normalizer.normalize(task)
-        vector_query = task
-        timer.mark("normalize")
+        queries = prepare_queries(task, await rewrite_queries(task))
+        bm25_queries = [self.normalizer.normalize(query) for query in queries]
+        timer.mark("query_rewrite")
 
-        bm25_hits: list[SearchHit] = []
-        vector_hits: list[SearchHit] = []
-        keyword_error: Exception | None = None
-        vector_error: Exception | None = None
+        search_result = await search_queries_in_parallel(
+            keyword_retriever=self.keyword_retriever,
+            vector_retriever=self.vector_retriever,
+            keyword_queries=bm25_queries,
+            vector_queries=queries,
+            keyword_top_k=es_top_k,
+            vector_top_k=faiss_top_k,
+        )
+        timer.mark("parallel_search")
+        _log_failures("keyword", task_id, search_result.keyword)
+        _log_failures("vector", task_id, search_result.vector)
 
-        try:
-            bm25_hits = await self.keyword_retriever.search(bm25_query, es_top_k)
-        except Exception as exc:
-            keyword_error = exc
-            logger.exception("keyword_search_failed task_id=%s", task_id)
-        timer.mark("keyword_search")
-
-        try:
-            vector_hits = await self.vector_retriever.search(vector_query, faiss_top_k)
-        except Exception as exc:
-            vector_error = exc
-            logger.exception("vector_search_failed task_id=%s", task_id)
-        timer.mark("vector_search")
-
-        if keyword_error is not None and vector_error is not None:
+        if search_result.keyword.all_failed and search_result.vector.all_failed:
             logger.error("decision_failed task_id=%s", task_id)
-            raise RuntimeError("Both ES and vector search failed") from vector_error
+            cause = search_result.vector.failures[-1].error
+            raise RuntimeError("Both ES and vector search failed") from cause
+
+        bm25_hits = search_result.keyword.hits
+        vector_hits = search_result.vector.hits
 
         selection = self.candidate_selector.select(bm25_hits, vector_hits)
         timer.mark("candidate_select")
@@ -86,10 +87,11 @@ class DecisionEngine:
         latency_ms = timer.finish()
 
         logger.info(
-            "decision_completed task_id=%s bm25_hits=%d vector_hits=%d "
+            "decision_completed task_id=%s query_count=%d bm25_hits=%d vector_hits=%d "
             "vector_candidates=%d reranker_candidates=%d "
             "effective_vector_threshold=%s selected_systems=%s latency_ms=%s",
             task_id,
+            len(queries),
             len(bm25_hits),
             len(vector_hits),
             len(selection.vector_candidates),
@@ -104,4 +106,20 @@ class DecisionEngine:
             selected_systems=selected_systems,
             decisions=decisions,
             latency_ms=latency_ms,
+        )
+
+
+def _log_failures(
+    channel: str,
+    task_id: str | None,
+    result: ChannelSearchResult,
+) -> None:
+    for failure in result.failures:
+        error = failure.error
+        logger.error(
+            "%s_search_failed task_id=%s query_index=%d",
+            channel,
+            task_id,
+            failure.query_index,
+            exc_info=(type(error), error, error.__traceback__),
         )

@@ -11,11 +11,10 @@ from app.schemas.search import SearchHit
 class FakeRetriever:
     def __init__(self, hits: list[SearchHit]) -> None:
         self.hits = hits
-        self.requested_top_k: list[int] = []
+        self.requests: list[tuple[str, int]] = []
 
     async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
-        del query
-        self.requested_top_k.append(top_k)
+        self.requests.append((query, top_k))
         return self.hits
 
 
@@ -69,5 +68,37 @@ async def test_decision_engine_reranks_candidates_and_selects_systems(monkeypatc
     assert response.decisions[0].selected is True
     assert response.decisions[0].reranker_score == 0.91
     assert reranker.calls == [("我可以吃海鲜吗？", ["memo_1"])]
-    assert keyword_retriever.requested_top_k == [7]
-    assert vector_retriever.requested_top_k == [13]
+    assert keyword_retriever.requests == [("我可以吃海鲜吗？", 7)]
+    assert vector_retriever.requests == [("我可以吃海鲜吗？", 13)]
+
+
+@pytest.mark.asyncio
+async def test_decision_engine_searches_all_rewritten_queries(monkeypatch) -> None:
+    keyword_retriever = FakeRetriever([])
+    vector_retriever = FakeRetriever([])
+    reranker = FakeReranker({})
+    engine = DecisionEngine(
+        keyword_retriever=keyword_retriever,
+        vector_retriever=vector_retriever,
+        reranker=reranker,
+    )
+
+    async def fake_rewrite_queries(task: str) -> list[str]:
+        assert task == "原始问题"
+        return ["  改写一  ", "改写二", "改写二", ""]
+
+    monkeypatch.setattr(
+        "app.decision.decision_engine.rewrite_queries",
+        fake_rewrite_queries,
+    )
+    monkeypatch.setattr(
+        "app.decision.decision_engine.get_settings",
+        lambda: SimpleNamespace(ES_TOP_K_DOCS=7, FAISS_TOP_K_DOCS=13),
+    )
+
+    response = await engine.decide("原始问题")
+
+    assert response.task == "原始问题"
+    assert keyword_retriever.requests == [("改写一", 7), ("改写二", 7)]
+    assert vector_retriever.requests == [("改写一", 13), ("改写二", 13)]
+    assert reranker.calls == [("原始问题", [])]
