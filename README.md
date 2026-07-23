@@ -89,8 +89,6 @@ LOCAL_ES_URL=http://127.0.0.1:9200
 LOCAL_ES_INDEX=pcs_retrieval_docs
 LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
-LOCAL_ES_SYNONYMS_PATH=
-LOCAL_ES_SYNONYM_TOKENIZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
 DEFAULT_TOP_K_DOCS=50
@@ -101,79 +99,17 @@ RRF_TOP_N_DOCS=10
 
 ## 查询处理
 
-ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做同义词替换、不做大小写归一化。
+ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做大小写归一化。
 
 原因：
 
-- ES 是词法检索，分词、大小写归一化、同义词、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
+- ES 是词法检索，分词、大小写归一化、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
 - BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
 - 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
 
 线上词法检索和优先证据关键词匹配由本地 ES 提供：ES 检索会请求 `keywords` / `summary` highlight，并优先使用 `keywords` highlight 生成 `matched_keywords`。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
 
 ES 查询使用 `cross_fields` 将 `summary` 和 `keywords` 作为组合字段匹配，并设置 `minimum_should_match="1<2"`：分析后只有一个词时要求命中该词，分析后有两个及以上词时至少命中两个词。
-
-### 查询期同义词
-
-应用支持把以下 JSON 词典转换为 ES 的单向同义词规则：
-
-```json
-{
-  "data": [
-    {
-      "word": "美国",
-      "synonyms": "美利坚合众国,united states,usa"
-    }
-  ]
-}
-```
-
-转换命令：
-
-```bash
-uv run python -m app.offline.build_synonym_file \
-  --input /path/to/synonyms.json \
-  --output /path/to/elasticsearch/config/analysis/pcs_synonyms.txt
-```
-
-转换器会进行 Unicode 和英文大小写归一化、去重并合并重复的 `word`。输出保留左侧原词，只进行从 `word` 到 synonyms 的单向查询扩展：
-
-```text
-美国 => 美国, 美利坚合众国, united states, usa
-```
-
-大词组可以选择限制每条规则的 synonym 数量：
-
-```bash
-uv run python -m app.offline.build_synonym_file \
-  --input /path/to/synonyms.json \
-  --output /path/to/elasticsearch/config/analysis/pcs_synonyms.txt \
-  --max-synonyms-per-rule 30
-```
-
-`LOCAL_ES_SYNONYMS_PATH` 是相对 Elasticsearch `config` 目录的路径，不是应用项目路径。使用 IK 和查询期同义词时可配置为：
-
-```env
-LOCAL_ES_ANALYZER=ik_smart
-LOCAL_ES_SEARCH_ANALYZER=ik_smart
-LOCAL_ES_SYNONYMS_PATH=analysis/pcs_synonyms.txt
-LOCAL_ES_SYNONYM_TOKENIZER=ik_smart
-```
-
-`LOCAL_ES_SYNONYM_TOKENIZER` 为空时会沿用 `LOCAL_ES_SEARCH_ANALYZER`；显式配置可以避免以后更换基础 analyzer 时产生歧义。
-
-第一次启用时运行 `--index-es`，让索引注册 `synonym_graph` 查询分析器。文档索引阶段仍使用 `LOCAL_ES_ANALYZER`，不会展开同义词：
-
-```bash
-uv run python -m app.offline.build_index --docs examples/docs.jsonl --index-es
-```
-
-后续只修改同义词文件时不需要重建文档索引，可以让 ES 重新加载查询分析器并清除请求缓存：
-
-```http
-POST /pcs_retrieval_docs/_reload_search_analyzers
-POST /pcs_retrieval_docs/_cache/clear?request=true
-```
 
 ## 评分机制
 
