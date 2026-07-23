@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.config import get_settings
 from app.retrieval.candidate_merger import CandidateMerger
+from app.retrieval.vector_candidate_selector import AdaptiveVectorCandidateSelector
 from app.schemas.search import SearchHit
 
 
@@ -22,32 +23,19 @@ class AdaptiveCandidateSelector:
         target_vector_hits: int | None = None,
         max_candidates: int | None = None,
         merger: CandidateMerger | None = None,
+        vector_selector: AdaptiveVectorCandidateSelector | None = None,
     ) -> None:
         settings = get_settings()
-        self.preferred_vector_threshold = (
-            settings.FAISS_PREFERRED_SCORE_THRESHOLD
-            if preferred_vector_threshold is None
-            else preferred_vector_threshold
-        )
-        self.min_vector_threshold = (
-            settings.FAISS_MIN_SCORE_THRESHOLD
-            if min_vector_threshold is None
-            else min_vector_threshold
-        )
-        self.target_vector_hits = (
-            settings.FAISS_TARGET_HITS if target_vector_hits is None else target_vector_hits
+        self.vector_selector = vector_selector or AdaptiveVectorCandidateSelector(
+            preferred_threshold=preferred_vector_threshold,
+            min_threshold=min_vector_threshold,
+            target_hits=target_vector_hits,
         )
         self.max_candidates = (
             settings.RERANKER_MAX_CANDIDATES if max_candidates is None else max_candidates
         )
         self.merger = merger or CandidateMerger()
 
-        if self.min_vector_threshold > self.preferred_vector_threshold:
-            raise ValueError(
-                "min_vector_threshold must not exceed preferred_vector_threshold"
-            )
-        if self.target_vector_hits <= 0:
-            raise ValueError("target_vector_hits must be greater than 0")
         if self.max_candidates <= 0:
             raise ValueError("max_candidates must be greater than 0")
 
@@ -56,7 +44,8 @@ class AdaptiveCandidateSelector:
         bm25_hits: list[SearchHit],
         vector_hits: list[SearchHit],
     ) -> CandidateSelection:
-        selected_vector_hits, effective_threshold = self._select_vector_hits(vector_hits)
+        vector_selection = self.vector_selector.select(vector_hits)
+        selected_vector_hits = vector_selection.vector_candidates
         merged = self.merger.merge(bm25_hits, selected_vector_hits)
 
         if len(merged) <= self.max_candidates:
@@ -73,45 +62,8 @@ class AdaptiveCandidateSelector:
         return CandidateSelection(
             candidates=candidates,
             vector_candidates=selected_vector_hits,
-            effective_vector_threshold=effective_threshold,
+            effective_vector_threshold=vector_selection.effective_threshold,
         )
-
-    def _select_vector_hits(
-        self,
-        vector_hits: list[SearchHit],
-    ) -> tuple[list[SearchHit], float | None]:
-        eligible = sorted(
-            (
-                hit
-                for hit in vector_hits
-                if hit.vector_score is not None
-                and hit.vector_score >= self.min_vector_threshold
-            ),
-            key=_vector_sort_key,
-        )
-        if not eligible:
-            return [], None
-
-        preferred = [
-            hit
-            for hit in eligible
-            if hit.vector_score is not None
-            and hit.vector_score >= self.preferred_vector_threshold
-        ]
-        if len(preferred) >= self.target_vector_hits:
-            effective_threshold = self.preferred_vector_threshold
-        else:
-            cutoff_index = min(self.target_vector_hits, len(eligible)) - 1
-            cutoff_score = eligible[cutoff_index].vector_score
-            assert cutoff_score is not None
-            effective_threshold = max(self.min_vector_threshold, cutoff_score)
-
-        selected = [
-            hit
-            for hit in eligible
-            if hit.vector_score is not None and hit.vector_score >= effective_threshold
-        ]
-        return selected, effective_threshold
 
 
 def _vector_sort_key(hit: SearchHit) -> tuple[int, float, str]:

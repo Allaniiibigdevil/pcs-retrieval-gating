@@ -79,6 +79,7 @@ def test_selector_keeps_both_routes_when_candidate_budget_is_full() -> None:
     )
 
     assert [hit.doc_id for hit in result.candidates] == ["e1", "v1", "e2", "v2"]
+    assert [hit.doc_id for hit in result.vector_candidates] == ["v1", "v2", "v3"]
 
 
 def test_selector_merges_same_document_from_both_routes() -> None:
