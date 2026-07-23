@@ -1,7 +1,10 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
-  topKDocs: 50,
-  faissScoreThreshold: 0.6,
+  esTopKDocs: 50,
+  faissTopKDocs: 50,
+  faissPreferredThreshold: 0.6,
+  faissMinThreshold: 0.3,
+  faissTargetHits: 10,
   rrfK: 20,
   rrfTopNDocs: 10,
 };
@@ -25,7 +28,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v5") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v6") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -33,7 +36,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v5", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v6", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -239,8 +242,11 @@ function renderDocs() {
 
 function fillSettingsForm() {
   document.querySelector("#apiBaseInput").value = state.settings.apiBase;
-  document.querySelector("#topKInput").value = state.settings.topKDocs;
-  document.querySelector("#faissScoreThresholdInput").value = state.settings.faissScoreThreshold;
+  document.querySelector("#esTopKInput").value = state.settings.esTopKDocs;
+  document.querySelector("#faissTopKInput").value = state.settings.faissTopKDocs;
+  document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
+  document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
+  document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
   document.querySelector("#rrfKInput").value = state.settings.rrfK;
   document.querySelector("#rrfTopNDocsInput").value = state.settings.rrfTopNDocs;
   renderEnvPreview();
@@ -249,9 +255,16 @@ function fillSettingsForm() {
 function readSettingsForm() {
   state.settings = {
     apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
-    topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
-    faissScoreThreshold: Number(
-      document.querySelector("#faissScoreThresholdInput").value || defaultSettings.faissScoreThreshold,
+    esTopKDocs: Number(document.querySelector("#esTopKInput").value || defaultSettings.esTopKDocs),
+    faissTopKDocs: Number(document.querySelector("#faissTopKInput").value || defaultSettings.faissTopKDocs),
+    faissPreferredThreshold: Number(
+      document.querySelector("#faissPreferredThresholdInput").value || defaultSettings.faissPreferredThreshold,
+    ),
+    faissMinThreshold: Number(
+      document.querySelector("#faissMinThresholdInput").value || defaultSettings.faissMinThreshold,
+    ),
+    faissTargetHits: Number(
+      document.querySelector("#faissTargetHitsInput").value || defaultSettings.faissTargetHits,
     ),
     rrfK: Number(document.querySelector("#rrfKInput").value || defaultSettings.rrfK),
     rrfTopNDocs: Number(
@@ -264,8 +277,11 @@ function readSettingsForm() {
 
 function buildEnvPreview() {
   return [
-    `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
-    `FAISS_SCORE_THRESHOLD=${state.settings.faissScoreThreshold}`,
+    `ES_TOP_K_DOCS=${state.settings.esTopKDocs}`,
+    `FAISS_TOP_K_DOCS=${state.settings.faissTopKDocs}`,
+    `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
+    `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
+    `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
     `RRF_K=${state.settings.rrfK}`,
     `RRF_TOP_N_DOCS=${state.settings.rrfTopNDocs}`,
   ].join("\n");
@@ -366,7 +382,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #faissScoreThresholdInput, #rrfKInput, #rrfTopNDocsInput",
+    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rrfKInput, #rrfTopNDocsInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

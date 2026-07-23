@@ -43,7 +43,7 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     vector_hits = await LocalFaissRetriever(
         artifact_store,
         embedding_service,
-        score_threshold=-1.0,
+        min_score_threshold=-1.0,
     ).search(
         "shanghai trip meeting",
         top_k=2,
@@ -57,14 +57,14 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     filtered_hits = await LocalFaissRetriever(
         artifact_store,
         embedding_service,
-        score_threshold=1.0,
+        min_score_threshold=1.0,
     ).search("shanghai trip meeting", top_k=2)
     assert filtered_hits == []
 
     mismatched_retriever = LocalFaissRetriever(
         artifact_store,
         MockEmbeddingService(dim=8),
-        score_threshold=-1.0,
+        min_score_threshold=-1.0,
     )
     with pytest.raises(
         RuntimeError,

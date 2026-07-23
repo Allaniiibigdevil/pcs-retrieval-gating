@@ -12,13 +12,15 @@ class LocalFaissRetriever:
         self,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
-        score_threshold: float | None = None,
+        min_score_threshold: float | None = None,
     ) -> None:
         settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service
-        self.score_threshold = (
-            settings.FAISS_SCORE_THRESHOLD if score_threshold is None else score_threshold
+        self.min_score_threshold = (
+            settings.FAISS_MIN_SCORE_THRESHOLD
+            if min_score_threshold is None
+            else min_score_threshold
         )
         self._docs_by_id: dict[str, SourceDoc] | None = None
         self._doc_ids: list[str] | None = None
@@ -64,7 +66,7 @@ class LocalFaissRetriever:
             if index < 0:
                 continue
             vector_score = float(score)
-            if vector_score < self.score_threshold:
+            if vector_score < self.min_score_threshold:
                 continue
             doc = self._docs_by_id[self._doc_ids[int(index)]]
             hits.append(

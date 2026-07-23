@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Retrieval Gating Console</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=rrf-v2" />
   </head>
   <body>
     <div class="app-shell">
@@ -132,9 +132,29 @@
                 <p>默认值：当前页面 origin。通过 FastAPI 静态页面访问时通常不用改。</p>
               </div>
               <div class="field-row">
-                <label for="topKInput">DEFAULT_TOP_K_DOCS</label>
-                <input id="topKInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：50。仅通过后端 `.env` 配置，ES 和 FAISS 各自执行一次全局 Top-K 召回。</p>
+                <label for="esTopKInput">ES_TOP_K_DOCS</label>
+                <input id="esTopKInput" type="number" min="1" max="1000" step="1" />
+                <p>默认值：50。ES 每次词法检索的全局 Top-K 窗口。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissTopKInput">FAISS_TOP_K_DOCS</label>
+                <input id="faissTopKInput" type="number" min="1" max="1000" step="1" />
+                <p>默认值：50。FAISS 只执行一次该深度的向量检索。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissPreferredThresholdInput">FAISS_PREFERRED_SCORE_THRESHOLD</label>
+                <input id="faissPreferredThresholdInput" type="number" min="-1" max="1" step="0.01" />
+                <p>默认值：0.60。达到优选阈值的向量候选全部保留。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissMinThresholdInput">FAISS_MIN_SCORE_THRESHOLD</label>
+                <input id="faissMinThresholdInput" type="number" min="-1" max="1" step="0.01" />
+                <p>默认值：0.30。补充向量候选时不可突破的安全下限。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissTargetHitsInput">FAISS_TARGET_HITS</label>
+                <input id="faissTargetHitsInput" type="number" min="1" max="1000" step="1" />
+                <p>默认值：10。优选候选不足时希望补到的数量，不是最大数量。</p>
               </div>
             </section>
 
@@ -142,11 +162,6 @@
               <div class="section-title">
                 <span class="step">融合</span>
                 <h2>RRF 参数</h2>
-              </div>
-              <div class="field-row">
-                <label for="faissScoreThresholdInput">FAISS_SCORE_THRESHOLD</label>
-                <input id="faissScoreThresholdInput" type="number" min="-1" max="1" step="0.01" />
-                <p>默认值：0.60。FAISS 文档低于该相似度时，在进入 RRF 前删除。</p>
               </div>
               <div class="field-row">
                 <label for="rrfKInput">RRF_K</label>
@@ -168,20 +183,24 @@
               <div class="formula-flow">
                 <div>
                   <strong>1. 全局候选</strong>
-                  <code>candidates = ES Top-K ∪ FAISS Top-K</code>
+                  <code>E = ES Top ES_TOP_K_DOCS</code>
+                  <code>V_raw = FAISS Top FAISS_TOP_K_DOCS where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
                   <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
-                  <code>FAISS candidate 仅在 vector_score &gt;= FAISS_SCORE_THRESHOLD 时保留</code>
                 </div>
                 <div>
-                  <strong>2. 文档 RRF</strong>
+                  <strong>2. 向量候选自适应</strong>
+                  <code>T_eff = T_preferred；不足 N 条时降到第 N 名分数，但不低于 T_min</code>
+                  <code>V = {doc in V_raw | vector_score &gt;= T_eff}</code>
+                  <code>整个过程只执行一次 FAISS search</code>
+                </div>
+                <div>
+                  <strong>3. 文档 RRF</strong>
+                  <code>candidates = E ∪ V（按 doc_id 去重）</code>
                   <code>rrf(doc) = I(ES)/(RRF_K + es_rank) + I(FAISS)/(RRF_K + vector_rank)</code>
                 </div>
                 <div>
-                  <strong>3. 文档截断</strong>
+                  <strong>4. 文档与系统选择</strong>
                   <code>selected_docs = global Top RRF_TOP_N_DOCS by rrf(doc)</code>
-                </div>
-                <div>
-                  <strong>4. 系统选择</strong>
                   <code>system_rrf = max(rrf(doc) of docs in this system)</code>
                   <code>selected = 该 system 至少有一篇文档进入 selected_docs</code>
                 </div>
@@ -206,6 +225,6 @@
       </main>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=rrf-v2"></script>
   </body>
 </html>

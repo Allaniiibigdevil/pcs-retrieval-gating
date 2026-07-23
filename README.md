@@ -91,8 +91,11 @@ LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
-DEFAULT_TOP_K_DOCS=50
-FAISS_SCORE_THRESHOLD=0.60
+ES_TOP_K_DOCS=50
+FAISS_TOP_K_DOCS=50
+FAISS_PREFERRED_SCORE_THRESHOLD=0.60
+FAISS_MIN_SCORE_THRESHOLD=0.30
+FAISS_TARGET_HITS=10
 RRF_K=20
 RRF_TOP_N_DOCS=10
 ```
@@ -113,11 +116,30 @@ ES 查询使用 `cross_fields` 将 `summary` 和 `keywords` 作为组合字段�
 
 ## 评分机制
 
-当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做 Reciprocal Rank Fusion。ES 与 FAISS 各自执行全局 Top-K 召回，FAISS 文档在进入融合前必须满足：
+当前实现不混合 BM25 `_score` 和向量相似度，只使用两路候选的排名做 Reciprocal Rank Fusion。ES 与 FAISS 分别按 `ES_TOP_K_DOCS`、`FAISS_TOP_K_DOCS` 执行一次全局 Top-K 召回。
+
+### 一次 FAISS 查询内自适应阈值
+
+FAISS 首先过滤低于安全下限的文档：
 
 ```text
-vector_score >= FAISS_SCORE_THRESHOLD
+V_raw = {doc in FAISS Top FAISS_TOP_K_DOCS
+         | vector_score >= FAISS_MIN_SCORE_THRESHOLD}
 ```
+
+设 `N = FAISS_TARGET_HITS`。优选阈值以上至少有 N 篇时全部保留；不足 N 篇时，把有效阈值降到第 N 名可用向量候选的分数，但不低于安全下限：
+
+```text
+T_eff = FAISS_PREFERRED_SCORE_THRESHOLD
+        if count(vector_score >= FAISS_PREFERRED_SCORE_THRESHOLD) >= N
+        else max(FAISS_MIN_SCORE_THRESHOLD, score_of_Nth_available_vector_hit)
+
+V = {doc in V_raw | vector_score >= T_eff}
+```
+
+如果安全下限以上不足 N 篇，则保留全部可用候选。整个过程只处理一次 FAISS 返回结果，不会重复查询索引。达到优选阈值的文档可能多于 N；N 是不足时希望补到的数量，不是最大数量。
+
+### RRF 融合
 
 同一个 `doc_id` 在两路候选中合并后，文档 RRF 分数为：
 
@@ -232,8 +254,9 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
   -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\"}"
 ```
 
-`/v1/decide` 不接受请求级 Top-K 覆盖；ES 和 FAISS 的召回数量统一由后端
-`DEFAULT_TOP_K_DOCS` 配置控制。调试检索接口 `/v1/search/*` 仍支持请求级 `top_k`。
+`/v1/decide` 不接受请求级 Top-K 覆盖；ES 和 FAISS 的召回数量分别由后端
+`ES_TOP_K_DOCS`、`FAISS_TOP_K_DOCS` 配置控制。调试检索接口 `/v1/search/*`
+仍支持请求级 `top_k`。
 
 返回示例：
 
