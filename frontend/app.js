@@ -15,6 +15,7 @@ const defaultSettings = {
 const state = {
   docs: [],
   settings: loadSettings(),
+  latestDecisionRequestId: 0,
 };
 
 const views = document.querySelectorAll(".view");
@@ -376,16 +377,21 @@ decideForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  const requestId = ++state.latestDecisionRequestId;
   const historyEntry = createQueryHistoryEntry(task);
   taskInput.value = "";
 
   try {
     const data = await postDecide(task);
     completeQueryHistoryEntry(historyEntry, data);
-    renderDecision(data);
+    if (requestId === state.latestDecisionRequestId) {
+      renderDecision(data);
+    }
   } catch (error) {
     failQueryHistoryEntry(historyEntry, error);
-    systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
+    if (requestId === state.latestDecisionRequestId) {
+      systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
+    }
   }
 });
 

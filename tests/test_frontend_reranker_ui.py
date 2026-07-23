@@ -12,6 +12,7 @@ def test_frontend_uses_only_reranker_for_final_score_and_rank() -> None:
     assert "粗召回信号（不参与最终排名）" in app_source
     assert "data.rewritten_queries" in app_source
     assert "messageList.prepend(node)" in app_source
+    assert "requestId === state.latestDecisionRequestId" in app_source
     assert "rrf" not in app_source.lower()
 
 
