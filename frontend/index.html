@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Retrieval Gating Console</title>
-    <link rel="stylesheet" href="./styles.css?v=rrf-v3" />
+    <link rel="stylesheet" href="./styles.css?v=rrf-v4" />
   </head>
   <body>
     <div class="app-shell">
@@ -178,6 +178,11 @@
                 <input id="rrfTopNDocsInput" type="number" min="1" max="200" step="1" />
                 <p>默认值：10。最终选取的全局 RRF 文档数；这些文档所属的 system 全部进入结果。</p>
               </div>
+              <div class="field-row">
+                <label for="rrfEsOnlyWeightInput">RRF_ES_ONLY_WEIGHT</label>
+                <input id="rrfEsOnlyWeightInput" type="number" min="0.01" max="1" step="0.01" />
+                <p>默认值：0.70。仅 ES 进入候选的文档保留 70% 的 ES 排名贡献，但不会被删除；设为 1 可关闭降权。</p>
+              </div>
             </section>
 
             <section class="formula-card">
@@ -201,7 +206,8 @@
                 <div>
                   <strong>3. 文档 RRF</strong>
                   <code>candidates = E ∪ V（按 doc_id 去重）</code>
-                  <code>rrf(doc) = I(ES)/(RRF_K + es_rank) + I(FAISS)/(RRF_K + vector_rank)</code>
+                  <code>w_es(doc) = 1（ES、FAISS 双路候选）；仅 ES 候选时为 RRF_ES_ONLY_WEIGHT</code>
+                  <code>rrf(doc) = w_es(doc) × I(ES)/(RRF_K + es_rank) + I(FAISS)/(RRF_K + vector_rank)</code>
                 </div>
                 <div>
                   <strong>4. 文档与系统选择</strong>
@@ -211,7 +217,7 @@
                 </div>
               </div>
               <div class="formula-note">
-                <p><strong>核心含义：</strong>RRF 只融合两个排序，不直接混合 BM25 和向量分数。system 使用最佳文档，不做多文档求和，也不强制返回固定数量的 system。</p>
+                <p><strong>核心含义：</strong>低于 FAISS 下限或未进入向量候选的 ES 文档仍会保留，只在最终 RRF 中降低 ES 路贡献。system 使用最佳文档，不做多文档求和，也不强制返回固定数量的 system。</p>
               </div>
             </section>
 
@@ -230,6 +236,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=rrf-v3"></script>
+    <script src="./app.js?v=rrf-v4"></script>
   </body>
 </html>

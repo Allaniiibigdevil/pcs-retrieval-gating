@@ -36,8 +36,20 @@ def test_rrf_score_uses_available_es_and_vector_ranks() -> None:
     no_rank = hit("none", "memo")
 
     assert reciprocal_rank_fusion_score(shared, 20) == pytest.approx(1 / 21 + 1 / 22)
-    assert reciprocal_rank_fusion_score(es_only, 20) == pytest.approx(1 / 23)
+    assert reciprocal_rank_fusion_score(es_only, 20) == pytest.approx(0.7 / 23)
     assert reciprocal_rank_fusion_score(no_rank, 20) == 0.0
+
+
+def test_rrf_es_only_weight_is_configurable_and_does_not_penalize_vector_hits() -> None:
+    es_only = hit("es", "memo", bm25_rank=1)
+    shared = hit("shared", "memo", bm25_rank=1, vector_rank=2)
+    vector_only = hit("vector", "memo", vector_rank=3)
+
+    assert reciprocal_rank_fusion_score(es_only, 20, 0.7) == pytest.approx(0.7 / 21)
+    assert reciprocal_rank_fusion_score(shared, 20, 0.1) == pytest.approx(
+        1 / 21 + 1 / 22
+    )
+    assert reciprocal_rank_fusion_score(vector_only, 20, 0.1) == pytest.approx(1 / 23)
 
 
 def test_global_rrf_top_docs_select_their_systems() -> None:
@@ -55,7 +67,7 @@ def test_global_rrf_top_docs_select_their_systems() -> None:
     assert by_system["memo"].selected is True
     assert by_system["album"].rrf_score == pytest.approx(1 / 21)
     assert by_system["album"].selected is True
-    assert by_system["todo"].rrf_score == pytest.approx(1 / 23)
+    assert by_system["todo"].rrf_score == pytest.approx(0.7 / 23)
     assert by_system["todo"].selected is False
 
 
@@ -70,10 +82,10 @@ def test_system_score_is_best_document_not_sum() -> None:
 
     assert len(decisions) == 1
     assert decisions[0].selected is True
-    assert decisions[0].rrf_score == pytest.approx(1 / 21, abs=1e-6)
+    assert decisions[0].rrf_score == pytest.approx(1 / 22, abs=1e-6)
     assert [doc.doc_id for doc in decisions[0].evidence_docs] == [
-        "es_first",
         "vector_second",
+        "es_first",
     ]
 
 
@@ -145,8 +157,12 @@ def test_system_aggregator_exposes_global_rrf_rank() -> None:
         {"rrf_k": 0},
         {"top_n_docs": 0},
         {"evidence_docs_per_system": 0},
+        {"es_only_weight": 0},
+        {"es_only_weight": 1.01},
     ],
 )
-def test_system_aggregator_rejects_invalid_configuration(kwargs: dict[str, int]) -> None:
+def test_system_aggregator_rejects_invalid_configuration(
+    kwargs: dict[str, int | float],
+) -> None:
     with pytest.raises(ValueError):
         SystemAggregator(**kwargs)

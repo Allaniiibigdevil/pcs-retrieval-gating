@@ -8,6 +8,7 @@ const defaultSettings = {
   evidenceDocsPerSystem: 3,
   rrfK: 20,
   rrfTopNDocs: 10,
+  rrfEsOnlyWeight: 0.7,
 };
 
 const state = {
@@ -30,7 +31,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v7") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v8") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -38,7 +39,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v7", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v8", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -190,6 +191,7 @@ function renderDecision(data) {
                 <div class="retrieval-scores">
                   <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
                   <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
+                  <span>RRF 分数 <strong>${formatNumber(doc.rrf_score)}</strong></span>
                 </div>
                 <div class="retrieval-ranks">
                   <span>BM25 排名 <strong>${doc.bm25_rank ? `#${doc.bm25_rank}` : "未召回"}</strong></span>
@@ -205,7 +207,10 @@ function renderDecision(data) {
       return `
         <article class="system-card ${item.selected ? "selected" : ""}">
           <div class="system-topline">
-            <div class="system-name">${escapeHtml(item.system_id)}</div>
+            <div>
+              <div class="system-name">${escapeHtml(item.system_id)}</div>
+              <div class="system-score">最佳 RRF 分数 ${formatNumber(item.rrf_score)}</div>
+            </div>
             <span class="badge ${item.selected ? "selected" : ""}">${item.selected ? "selected" : "candidate"}</span>
           </div>
           <div class="evidence">
@@ -280,6 +285,7 @@ function fillSettingsForm() {
   document.querySelector("#evidenceDocsPerSystemInput").value = state.settings.evidenceDocsPerSystem;
   document.querySelector("#rrfKInput").value = state.settings.rrfK;
   document.querySelector("#rrfTopNDocsInput").value = state.settings.rrfTopNDocs;
+  document.querySelector("#rrfEsOnlyWeightInput").value = state.settings.rrfEsOnlyWeight;
   renderEnvPreview();
 }
 
@@ -304,6 +310,9 @@ function readSettingsForm() {
     rrfTopNDocs: Number(
       document.querySelector("#rrfTopNDocsInput").value || defaultSettings.rrfTopNDocs,
     ),
+    rrfEsOnlyWeight: Number(
+      document.querySelector("#rrfEsOnlyWeightInput").value || defaultSettings.rrfEsOnlyWeight,
+    ),
   };
   saveSettingsDraft();
   renderEnvPreview();
@@ -319,6 +328,7 @@ function buildEnvPreview() {
     `EVIDENCE_DOCS_PER_SYSTEM=${state.settings.evidenceDocsPerSystem}`,
     `RRF_K=${state.settings.rrfK}`,
     `RRF_TOP_N_DOCS=${state.settings.rrfTopNDocs}`,
+    `RRF_ES_ONLY_WEIGHT=${state.settings.rrfEsOnlyWeight}`,
   ].join("\n");
 }
 
@@ -419,7 +429,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #evidenceDocsPerSystemInput, #rrfKInput, #rrfTopNDocsInput",
+    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #evidenceDocsPerSystemInput, #rrfKInput, #rrfTopNDocsInput, #rrfEsOnlyWeightInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

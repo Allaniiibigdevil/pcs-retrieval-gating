@@ -19,3 +19,13 @@ def test_settings_page_documents_evidence_limit_and_multi_query_retrieval() -> N
     assert "每条改写 query 只执行一次 FAISS search" in html
     assert "ES_TOP_K_DOCS" in html
     assert "FAISS_TOP_K_DOCS" in html
+    assert "RRF_ES_ONLY_WEIGHT" in html
+    assert "w_es(doc)" in html
+
+
+def test_frontend_displays_document_and_system_rrf_scores() -> None:
+    app_source = (FRONTEND_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "RRF 分数" in app_source
+    assert "最佳 RRF 分数" in app_source
+    assert "RRF_ES_ONLY_WEIGHT" in app_source

@@ -5,13 +5,20 @@ from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
 
 
-def reciprocal_rank_fusion_score(hit: SearchHit, rank_constant: int) -> float:
-    """Fuse the ES and FAISS ranks for one document."""
+def reciprocal_rank_fusion_score(
+    hit: SearchHit,
+    rank_constant: int,
+    es_only_weight: float = 0.70,
+) -> float:
+    """Fuse ES and FAISS ranks, downweighting documents found only by ES."""
 
     score = 0.0
-    if hit.bm25_rank is not None and hit.bm25_rank > 0:
-        score += 1.0 / (rank_constant + hit.bm25_rank)
-    if hit.vector_rank is not None and hit.vector_rank > 0:
+    has_es_rank = hit.bm25_rank is not None and hit.bm25_rank > 0
+    has_vector_rank = hit.vector_rank is not None and hit.vector_rank > 0
+    if has_es_rank:
+        weight = 1.0 if has_vector_rank else es_only_weight
+        score += weight / (rank_constant + hit.bm25_rank)
+    if has_vector_rank:
         score += 1.0 / (rank_constant + hit.vector_rank)
     return score
 
@@ -43,6 +50,7 @@ class SystemAggregator:
         rrf_k: int | None = None,
         top_n_docs: int | None = None,
         evidence_docs_per_system: int | None = None,
+        es_only_weight: float | None = None,
     ) -> None:
         settings = get_settings()
         self.rrf_k = settings.RRF_K if rrf_k is None else rrf_k
@@ -52,16 +60,31 @@ class SystemAggregator:
             if evidence_docs_per_system is None
             else evidence_docs_per_system
         )
+        self.es_only_weight = (
+            settings.RRF_ES_ONLY_WEIGHT
+            if es_only_weight is None
+            else es_only_weight
+        )
         if self.rrf_k <= 0:
             raise ValueError("rrf_k must be greater than 0")
         if self.top_n_docs <= 0:
             raise ValueError("top_n_docs must be greater than 0")
         if self.evidence_docs_per_system <= 0:
             raise ValueError("evidence_docs_per_system must be greater than 0")
+        if not 0.0 < self.es_only_weight <= 1.0:
+            raise ValueError("es_only_weight must be greater than 0 and at most 1")
 
     def aggregate(self, evidence_docs: list[SearchHit]) -> list[SystemDecision]:
         scored_docs = [
-            (doc, reciprocal_rank_fusion_score(doc, self.rrf_k)) for doc in evidence_docs
+            (
+                doc,
+                reciprocal_rank_fusion_score(
+                    doc,
+                    self.rrf_k,
+                    self.es_only_weight,
+                ),
+            )
+            for doc in evidence_docs
         ]
         scored_docs = [item for item in scored_docs if item[1] > 0.0]
         scored_docs.sort(key=_doc_sort_key)

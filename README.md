@@ -100,6 +100,7 @@ FAISS_TARGET_HITS=10
 EVIDENCE_DOCS_PER_SYSTEM=3
 RRF_K=20
 RRF_TOP_N_DOCS=10
+RRF_ES_ONLY_WEIGHT=0.70
 ```
 
 ## 查询处理
@@ -158,13 +159,20 @@ V = {doc in V_raw | vector_score >= T_eff}
 
 ```text
 rrf(doc) =
-  I(doc in ES) / (RRF_K + es_rank)
+  w_es(doc) * I(doc in ES) / (RRF_K + es_rank)
   + I(doc in FAISS) / (RRF_K + vector_rank)
+
+w_es(doc) =
+  1.0                         if doc also enters the FAISS candidate set
+  RRF_ES_ONLY_WEIGHT          if doc enters only through ES
 ```
 
 说明：
 
 - 某一路没有召回该文档时，该路贡献为 0。
+- 低于 `FAISS_MIN_SCORE_THRESHOLD` 或未进入自适应向量候选的 ES 文档不会被删除；
+  默认只把它的 ES 路贡献乘 `RRF_ES_ONLY_WEIGHT=0.70`。
+- `RRF_ES_ONLY_WEIGHT` 只影响 ES 单路候选；双路候选与 FAISS 单路候选保持原公式。
 - `RRF_K` 控制排名位置差异；当前默认值 20，适合较浅的候选列表。
 - 全局按 `rrf(doc)` 排序后取 `RRF_TOP_N_DOCS` 篇文档，默认取前 10 篇。
 - 只要一个 system 至少有一篇文档进入全局 RRF Top-N，就进入 `selected_systems`。

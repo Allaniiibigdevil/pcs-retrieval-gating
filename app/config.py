@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
     RRF_K: int = Field(default=20, ge=1)
     RRF_TOP_N_DOCS: int = Field(default=10, ge=1)
+    RRF_ES_ONLY_WEIGHT: float = Field(default=0.70, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_retrieval_thresholds(self) -> "Settings":
