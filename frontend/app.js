@@ -5,8 +5,8 @@ const defaultSettings = {
   faissPreferredThreshold: 0.6,
   faissMinThreshold: 0.3,
   faissTargetHits: 10,
+  evidenceDocsPerSystem: 3,
   rerankerModelPath: "Alibaba-NLP/gte-multilingual-reranker-base",
-  rerankerMaxCandidates: 30,
   rerankerScoreThreshold: 0.5,
   rerankerBatchSize: 8,
   rerankerMaxLength: 512,
@@ -31,7 +31,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v7") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v8") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -39,7 +39,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v7", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v8", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -115,12 +115,40 @@ function renderKeywordBadges(keywords = [], matchedKeywords = [], highlight = {}
     .join("");
 }
 
-function addMessage(role, text) {
-  const node = document.createElement("div");
-  node.className = `message ${role}`;
-  node.textContent = text;
-  messageList.appendChild(node);
-  messageList.scrollTop = messageList.scrollHeight;
+function createQueryHistoryEntry(task) {
+  messageList.querySelector(".query-history-empty")?.remove();
+  const node = document.createElement("article");
+  node.className = "query-history-item pending";
+  node.innerHTML = `
+    <div class="query-history-label">用户问题</div>
+    <div class="query-history-question">${escapeHtml(task)}</div>
+    <div class="query-history-status">生成中...</div>
+    <div class="query-history-queries"></div>
+  `;
+  messageList.prepend(node);
+  messageList.scrollTop = 0;
+  return node;
+}
+
+function completeQueryHistoryEntry(node, data) {
+  const selected = data.selected_systems || [];
+  const queries = data.rewritten_queries?.length
+    ? data.rewritten_queries
+    : [data.task].filter(Boolean);
+  node.classList.remove("pending", "error");
+  node.querySelector(".query-history-status").textContent = selected.length
+    ? `建议检索：${selected.join(", ")}`
+    : "没有选中子系统";
+  node.querySelector(".query-history-queries").innerHTML = `
+    <div class="query-history-label">改写 Query</div>
+    <ol>${queries.map((query) => `<li>${escapeHtml(query)}</li>`).join("")}</ol>
+  `;
+}
+
+function failQueryHistoryEntry(node, error) {
+  node.classList.remove("pending");
+  node.classList.add("error");
+  node.querySelector(".query-history-status").textContent = `请求失败：${error.message}`;
 }
 
 async function postDecide(task) {
@@ -264,8 +292,8 @@ function fillSettingsForm() {
   document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
   document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
   document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
+  document.querySelector("#evidenceDocsPerSystemInput").value = state.settings.evidenceDocsPerSystem;
   document.querySelector("#rerankerModelPathInput").value = state.settings.rerankerModelPath;
-  document.querySelector("#rerankerMaxCandidatesInput").value = state.settings.rerankerMaxCandidates;
   document.querySelector("#rerankerScoreThresholdInput").value = state.settings.rerankerScoreThreshold;
   document.querySelector("#rerankerBatchSizeInput").value = state.settings.rerankerBatchSize;
   document.querySelector("#rerankerMaxLengthInput").value = state.settings.rerankerMaxLength;
@@ -286,11 +314,11 @@ function readSettingsForm() {
     faissTargetHits: Number(
       document.querySelector("#faissTargetHitsInput").value || defaultSettings.faissTargetHits,
     ),
+    evidenceDocsPerSystem: Number(
+      document.querySelector("#evidenceDocsPerSystemInput").value || defaultSettings.evidenceDocsPerSystem,
+    ),
     rerankerModelPath:
       document.querySelector("#rerankerModelPathInput").value.trim() || defaultSettings.rerankerModelPath,
-    rerankerMaxCandidates: Number(
-      document.querySelector("#rerankerMaxCandidatesInput").value || defaultSettings.rerankerMaxCandidates,
-    ),
     rerankerScoreThreshold: Number(
       document.querySelector("#rerankerScoreThresholdInput").value || defaultSettings.rerankerScoreThreshold,
     ),
@@ -312,14 +340,13 @@ function buildEnvPreview() {
     `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
     `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
     `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
+    `EVIDENCE_DOCS_PER_SYSTEM=${state.settings.evidenceDocsPerSystem}`,
     `RERANKER_MODEL_PATH=${state.settings.rerankerModelPath}`,
     "RERANKER_LOCAL_FILES_ONLY=true",
     "RERANKER_DEVICE=auto",
     `RERANKER_BATCH_SIZE=${state.settings.rerankerBatchSize}`,
     `RERANKER_MAX_LENGTH=${state.settings.rerankerMaxLength}`,
-    `RERANKER_MAX_CANDIDATES=${state.settings.rerankerMaxCandidates}`,
     `RERANKER_SCORE_THRESHOLD=${state.settings.rerankerScoreThreshold}`,
-    "RERANKER_EVIDENCE_DOCS_PER_SYSTEM=3",
   ].join("\n");
 }
 
@@ -349,18 +376,15 @@ decideForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  addMessage("user", task);
+  const historyEntry = createQueryHistoryEntry(task);
   taskInput.value = "";
-  addMessage("assistant", "生成中...");
 
   try {
     const data = await postDecide(task);
-    messageList.lastElementChild.textContent = data.selected_systems?.length
-      ? `建议检索：${data.selected_systems.join(", ")}`
-      : "没有选中子系统";
+    completeQueryHistoryEntry(historyEntry, data);
     renderDecision(data);
   } catch (error) {
-    messageList.lastElementChild.textContent = `请求失败：${error.message}`;
+    failQueryHistoryEntry(historyEntry, error);
     systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
   }
 });
@@ -418,7 +442,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rerankerModelPathInput, #rerankerMaxCandidatesInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
+    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #evidenceDocsPerSystemInput, #rerankerModelPathInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);
@@ -438,5 +462,5 @@ document.querySelector("#healthButton").addEventListener("click", checkHealth);
 fillSettingsForm();
 renderDocs();
 systemList.innerHTML = `<div class="empty-state">暂无候选系统</div>`;
-addMessage("assistant", "输入任务后生成候选系统。");
+messageList.innerHTML = `<div class="empty-state query-history-empty">暂无查询记录</div>`;
 checkHealth();

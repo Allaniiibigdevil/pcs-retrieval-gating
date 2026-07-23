@@ -27,7 +27,6 @@ def test_selector_lowers_vector_threshold_to_target_hit_count() -> None:
         preferred_vector_threshold=0.70,
         min_vector_threshold=0.30,
         target_vector_hits=3,
-        max_candidates=10,
     )
 
     result = selector.select(
@@ -49,7 +48,6 @@ def test_selector_never_lowers_below_minimum_threshold() -> None:
         preferred_vector_threshold=0.70,
         min_vector_threshold=0.30,
         target_vector_hits=3,
-        max_candidates=10,
     )
 
     result = selector.select(
@@ -65,12 +63,11 @@ def test_selector_never_lowers_below_minimum_threshold() -> None:
     assert [hit.doc_id for hit in result.vector_candidates] == ["v1", "v2"]
 
 
-def test_selector_keeps_both_routes_when_candidate_budget_is_full() -> None:
+def test_selector_keeps_every_merged_candidate() -> None:
     selector = AdaptiveCandidateSelector(
         preferred_vector_threshold=0.50,
         min_vector_threshold=0.30,
         target_vector_hits=2,
-        max_candidates=4,
     )
 
     result = selector.select(
@@ -78,7 +75,14 @@ def test_selector_keeps_both_routes_when_candidate_budget_is_full() -> None:
         [vector_hit(f"v{rank}", 0.9 - rank / 10, rank) for rank in range(1, 4)],
     )
 
-    assert [hit.doc_id for hit in result.candidates] == ["e1", "v1", "e2", "v2"]
+    assert [hit.doc_id for hit in result.candidates] == [
+        "e1",
+        "e2",
+        "e3",
+        "v1",
+        "v2",
+        "v3",
+    ]
     assert [hit.doc_id for hit in result.vector_candidates] == ["v1", "v2", "v3"]
 
 
@@ -87,7 +91,6 @@ def test_selector_merges_same_document_from_both_routes() -> None:
         preferred_vector_threshold=0.50,
         min_vector_threshold=0.30,
         target_vector_hits=1,
-        max_candidates=10,
     )
     es_hit = bm25_hit("shared", 1)
     es_hit.system_id = "memo"

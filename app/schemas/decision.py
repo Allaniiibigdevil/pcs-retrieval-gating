@@ -30,6 +30,7 @@ class SystemDecision(BaseModel):
 class DecideResponse(BaseModel):
     task_id: str | None = None
     task: str
+    rewritten_queries: list[str] = Field(default_factory=list)
     selected_systems: list[str] = Field(default_factory=list)
     decisions: list[SystemDecision]
     latency_ms: dict[str, float] = Field(default_factory=dict)

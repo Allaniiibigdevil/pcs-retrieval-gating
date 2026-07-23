@@ -35,7 +35,7 @@ class SystemAggregator:
             else score_threshold
         )
         self.evidence_docs_per_system = (
-            settings.RERANKER_EVIDENCE_DOCS_PER_SYSTEM
+            settings.EVIDENCE_DOCS_PER_SYSTEM
             if evidence_docs_per_system is None
             else evidence_docs_per_system
         )

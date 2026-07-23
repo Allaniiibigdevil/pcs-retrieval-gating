@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Retrieval Gating · Reranker Console</title>
-    <link rel="stylesheet" href="./styles.css?v=reranker-v3" />
+    <link rel="stylesheet" href="./styles.css?v=reranker-v4" />
   </head>
   <body>
     <div class="app-shell">
@@ -59,7 +59,7 @@
                   <button class="primary-button" type="submit">生成候选系统</button>
                 </div>
               </form>
-              <div class="message-list" id="messageList"></div>
+              <div class="message-list" id="messageList" aria-live="polite"></div>
             </section>
 
             <section class="systems-panel">
@@ -156,6 +156,11 @@
                 <input id="faissTargetHitsInput" type="number" min="1" max="1000" step="1" />
                 <p>默认值：10。优选阈值下数量不足时，逻辑降低阈值以补足向量候选；不会再次请求 FAISS。</p>
               </div>
+              <div class="field-row">
+                <label for="evidenceDocsPerSystemInput">EVIDENCE_DOCS_PER_SYSTEM</label>
+                <input id="evidenceDocsPerSystemInput" type="number" min="1" max="100" step="1" />
+                <p>默认值：3。每个候选 system 最多返回并展示的证据文档数。</p>
+              </div>
             </section>
 
             <section class="settings-card">
@@ -167,11 +172,6 @@
                 <label for="rerankerModelPathInput">RERANKER_MODEL_PATH</label>
                 <input id="rerankerModelPathInput" type="text" />
                 <p>默认使用项目目录下的 `Alibaba-NLP/gte-multilingual-reranker-base`。</p>
-              </div>
-              <div class="field-row">
-                <label for="rerankerMaxCandidatesInput">RERANKER_MAX_CANDIDATES</label>
-                <input id="rerankerMaxCandidatesInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：30。精排的最大文档数；超出时按 ES、FAISS 两路交替保留候选。</p>
               </div>
               <div class="field-row">
                 <label for="rerankerScoreThresholdInput">RERANKER_SCORE_THRESHOLD</label>
@@ -198,19 +198,19 @@
               <div class="formula-flow">
                 <div>
                   <strong>1. 全局候选</strong>
-                  <code>E = ES Top ES_TOP_K_DOCS</code>
-                  <code>V_raw = FAISS Top FAISS_TOP_K_DOCS where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
+                  <code>E = dedupe(∪ ES(query, ES_TOP_K_DOCS))</code>
+                  <code>V_raw = dedupe(∪ FAISS(query, FAISS_TOP_K_DOCS)) where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
                   <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
                 </div>
                 <div>
                   <strong>2. 向量候选自适应</strong>
                   <code>T_eff = T_preferred；不足 N 条时降到第 N 名分数，但不低于 T_min</code>
                   <code>V = {doc in V_raw | vector_score &gt;= T_eff}</code>
-                  <code>整个过程只执行一次 FAISS search</code>
+                  <code>每条改写 query 只执行一次 FAISS search</code>
                 </div>
                 <div>
                   <strong>3. Cross-Encoder 精排</strong>
-                  <code>C = bounded(E ∪ V, RERANKER_MAX_CANDIDATES)</code>
+                  <code>C = dedupe(E ∪ V)</code>
                   <code>zᵢ = GTE(query, keywordsᵢ + summaryᵢ)</code>
                   <code>sᵢ = sigmoid(zᵢ) = 1 / (1 + exp(-zᵢ))</code>
                   <code>reranker_rank(dᵢ) = rank_desc(sᵢ)</code>
@@ -241,6 +241,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=reranker-v3"></script>
+    <script src="./app.js?v=reranker-v4"></script>
   </body>
 </html>

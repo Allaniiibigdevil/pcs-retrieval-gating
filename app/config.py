@@ -43,15 +43,14 @@ class Settings(BaseSettings):
     FAISS_PREFERRED_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
     FAISS_MIN_SCORE_THRESHOLD: float = Field(default=0.30, ge=-1.0, le=1.0)
     FAISS_TARGET_HITS: int = Field(default=10, ge=1, le=1000)
+    EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
 
     RERANKER_MODEL_PATH: str = "Alibaba-NLP/gte-multilingual-reranker-base"
     RERANKER_LOCAL_FILES_ONLY: bool = True
     RERANKER_DEVICE: str = "auto"
     RERANKER_BATCH_SIZE: int = Field(default=8, ge=1, le=256)
     RERANKER_MAX_LENGTH: int = Field(default=512, ge=8, le=8192)
-    RERANKER_MAX_CANDIDATES: int = Field(default=30, ge=1, le=1000)
     RERANKER_SCORE_THRESHOLD: float = Field(default=0.50, ge=0.0, le=1.0)
-    RERANKER_EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_retrieval_thresholds(self) -> "Settings":
