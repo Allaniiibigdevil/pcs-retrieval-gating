@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import math
 import random
@@ -51,7 +52,8 @@ class BGEEmbeddingService:
         return (await self.embed_batch([text]))[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        embeddings = self.model.encode(
+        embeddings = await asyncio.to_thread(
+            self.model.encode,
             texts,
             normalize_embeddings=True,
             convert_to_numpy=True,
