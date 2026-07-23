@@ -1,3 +1,5 @@
+import asyncio
+
 import numpy as np
 
 from app.config import get_settings
@@ -59,7 +61,11 @@ class LocalFaissRetriever:
                 "`uv run python -m app.offline.build_index` and restart the service, or restore "
                 "the embedding model recorded in data/artifacts/manifest.json."
             )
-        scores, indices = self._index.search(vector, min(top_k, len(self._doc_ids)))
+        scores, indices = await asyncio.to_thread(
+            self._index.search,
+            vector,
+            min(top_k, len(self._doc_ids)),
+        )
 
         hits: list[SearchHit] = []
         for rank, (score, index) in enumerate(zip(scores[0], indices[0]), start=1):

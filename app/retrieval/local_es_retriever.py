@@ -1,3 +1,4 @@
+import asyncio
 import json
 from urllib import request
 
@@ -19,7 +20,8 @@ class LocalElasticsearchRetriever:
         if not query.strip():
             return []
 
-        response = self._request(
+        response = await asyncio.to_thread(
+            self._request,
             "POST",
             f"/{self.index_name}/_search",
             {
