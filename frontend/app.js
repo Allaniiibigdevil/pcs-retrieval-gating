@@ -1,6 +1,7 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
-  topKDocs: 50,
+  esTopKDocs: 50,
+  faissTopKDocs: 50,
   faissPreferredThreshold: 0.6,
   faissMinThreshold: 0.3,
   faissTargetHits: 10,
@@ -30,7 +31,7 @@ const taskInput = document.querySelector("#taskInput");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v6") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v7") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -38,7 +39,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v6", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v7", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -258,7 +259,8 @@ function renderDocs() {
 
 function fillSettingsForm() {
   document.querySelector("#apiBaseInput").value = state.settings.apiBase;
-  document.querySelector("#topKInput").value = state.settings.topKDocs;
+  document.querySelector("#esTopKInput").value = state.settings.esTopKDocs;
+  document.querySelector("#faissTopKInput").value = state.settings.faissTopKDocs;
   document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
   document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
   document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
@@ -273,7 +275,8 @@ function fillSettingsForm() {
 function readSettingsForm() {
   state.settings = {
     apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
-    topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
+    esTopKDocs: Number(document.querySelector("#esTopKInput").value || defaultSettings.esTopKDocs),
+    faissTopKDocs: Number(document.querySelector("#faissTopKInput").value || defaultSettings.faissTopKDocs),
     faissPreferredThreshold: Number(
       document.querySelector("#faissPreferredThresholdInput").value || defaultSettings.faissPreferredThreshold,
     ),
@@ -304,7 +307,8 @@ function readSettingsForm() {
 
 function buildEnvPreview() {
   return [
-    `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
+    `ES_TOP_K_DOCS=${state.settings.esTopKDocs}`,
+    `FAISS_TOP_K_DOCS=${state.settings.faissTopKDocs}`,
     `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
     `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
     `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
@@ -414,7 +418,7 @@ docsFilterInput.addEventListener("input", renderDocs);
 
 document
   .querySelectorAll(
-    "#apiBaseInput, #topKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rerankerModelPathInput, #rerankerMaxCandidatesInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
+    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #rerankerModelPathInput, #rerankerMaxCandidatesInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
   )
   .forEach((input) => {
     input.addEventListener("input", readSettingsForm);

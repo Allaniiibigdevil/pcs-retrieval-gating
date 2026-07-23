@@ -38,8 +38,15 @@ class DecisionEngine:
         task: str,
         task_id: str | None = None,
     ) -> DecideResponse:
-        effective_top_k = get_settings().DEFAULT_TOP_K_DOCS
-        logger.info("decision_started task_id=%s top_k=%d", task_id, effective_top_k)
+        settings = get_settings()
+        es_top_k = settings.ES_TOP_K_DOCS
+        faiss_top_k = settings.FAISS_TOP_K_DOCS
+        logger.info(
+            "decision_started task_id=%s es_top_k=%d faiss_top_k=%d",
+            task_id,
+            es_top_k,
+            faiss_top_k,
+        )
         timer = StageTimer()
         bm25_query = self.normalizer.normalize(task)
         vector_query = task
@@ -51,14 +58,14 @@ class DecisionEngine:
         vector_error: Exception | None = None
 
         try:
-            bm25_hits = await self.keyword_retriever.search(bm25_query, effective_top_k)
+            bm25_hits = await self.keyword_retriever.search(bm25_query, es_top_k)
         except Exception as exc:
             keyword_error = exc
             logger.exception("keyword_search_failed task_id=%s", task_id)
         timer.mark("keyword_search")
 
         try:
-            vector_hits = await self.vector_retriever.search(vector_query, effective_top_k)
+            vector_hits = await self.vector_retriever.search(vector_query, faiss_top_k)
         except Exception as exc:
             vector_error = exc
             logger.exception("vector_search_failed task_id=%s", task_id)

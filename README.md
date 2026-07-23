@@ -92,7 +92,8 @@ LOCAL_ES_ANALYZER=standard
 LOCAL_ES_SEARCH_ANALYZER=standard
 LOCAL_ES_INDEX_ON_BUILD=false
 
-DEFAULT_TOP_K_DOCS=50
+ES_TOP_K_DOCS=50
+FAISS_TOP_K_DOCS=50
 FAISS_PREFERRED_SCORE_THRESHOLD=0.60
 FAISS_MIN_SCORE_THRESHOLD=0.30
 FAISS_TARGET_HITS=10
@@ -283,8 +284,9 @@ curl -X POST http://127.0.0.1:8000/v1/decide ^
   -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\"}"
 ```
 
-`/v1/decide` 不接受请求级 Top-K 覆盖；ES 和 FAISS 的召回数量统一由后端
-`DEFAULT_TOP_K_DOCS` 配置控制。调试检索接口 `/v1/search/*` 仍支持请求级 `top_k`。
+`/v1/decide` 不接受请求级 Top-K 覆盖；ES 和 FAISS 的召回数量分别由后端
+`ES_TOP_K_DOCS`、`FAISS_TOP_K_DOCS` 配置控制。调试检索接口 `/v1/search/*`
+仍支持请求级 `top_k`。
 
 返回示例：
 

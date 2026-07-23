@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Retrieval Gating · Reranker Console</title>
-    <link rel="stylesheet" href="./styles.css?v=reranker-v2" />
+    <link rel="stylesheet" href="./styles.css?v=reranker-v3" />
   </head>
   <body>
     <div class="app-shell">
@@ -132,9 +132,14 @@
                 <p>默认值：当前页面 origin。通过 FastAPI 静态页面访问时通常不用改。</p>
               </div>
               <div class="field-row">
-                <label for="topKInput">DEFAULT_TOP_K_DOCS</label>
-                <input id="topKInput" type="number" min="1" max="200" step="1" />
-                <p>默认值：50。仅通过后端 `.env` 配置，ES 和 FAISS 各自执行一次全局 Top-K 召回。</p>
+                <label for="esTopKInput">ES_TOP_K_DOCS</label>
+                <input id="esTopKInput" type="number" min="1" max="1000" step="1" />
+                <p>默认值：50。ES 每次词法检索的全局 Top-K 窗口。</p>
+              </div>
+              <div class="field-row">
+                <label for="faissTopKInput">FAISS_TOP_K_DOCS</label>
+                <input id="faissTopKInput" type="number" min="1" max="1000" step="1" />
+                <p>默认值：50。FAISS 只执行一次该深度的向量检索。</p>
               </div>
               <div class="field-row">
                 <label for="faissPreferredThresholdInput">FAISS_PREFERRED_SCORE_THRESHOLD</label>
@@ -148,7 +153,7 @@
               </div>
               <div class="field-row">
                 <label for="faissTargetHitsInput">FAISS_TARGET_HITS</label>
-                <input id="faissTargetHitsInput" type="number" min="1" max="200" step="1" />
+                <input id="faissTargetHitsInput" type="number" min="1" max="1000" step="1" />
                 <p>默认值：10。优选阈值下数量不足时，逻辑降低阈值以补足向量候选；不会再次请求 FAISS。</p>
               </div>
             </section>
@@ -193,8 +198,8 @@
               <div class="formula-flow">
                 <div>
                   <strong>1. 全局候选</strong>
-                  <code>E = ES Top-K</code>
-                  <code>V_raw = FAISS Top-K where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
+                  <code>E = ES Top ES_TOP_K_DOCS</code>
+                  <code>V_raw = FAISS Top FAISS_TOP_K_DOCS where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
                   <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
                 </div>
                 <div>
@@ -236,6 +241,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=reranker-v2"></script>
+    <script src="./app.js?v=reranker-v3"></script>
   </body>
 </html>

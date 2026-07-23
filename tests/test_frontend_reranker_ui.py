@@ -20,4 +20,7 @@ def test_settings_page_documents_reranker_formula() -> None:
     assert "reranker_rank(dᵢ) = rank_desc(sᵢ)" in html
     assert "Score(S) = max" in html
     assert "RERANKER_SCORE_THRESHOLD" in html
+    assert "ES_TOP_K_DOCS" in html
+    assert "FAISS_TOP_K_DOCS" in html
+    assert "DEFAULT_TOP_K_DOCS" not in html
     assert "rrf" not in html.lower()

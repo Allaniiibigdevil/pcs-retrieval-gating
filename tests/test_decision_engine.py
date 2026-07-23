@@ -1,6 +1,7 @@
+from types import SimpleNamespace
+
 import pytest
 
-from app.config import get_settings
 from app.decision.decision_engine import DecisionEngine
 from app.decision.system_aggregator import SystemAggregator
 from app.reranking.gte_reranker import attach_reranker_scores
@@ -36,7 +37,7 @@ class FakeReranker:
 
 
 @pytest.mark.asyncio
-async def test_decision_engine_reranks_candidates_and_selects_systems() -> None:
+async def test_decision_engine_reranks_candidates_and_selects_systems(monkeypatch) -> None:
     keyword_retriever = FakeRetriever([])
     vector_retriever = FakeRetriever(
         [
@@ -56,6 +57,10 @@ async def test_decision_engine_reranks_candidates_and_selects_systems() -> None:
         reranker=reranker,
         aggregator=SystemAggregator(score_threshold=0.7),
     )
+    monkeypatch.setattr(
+        "app.decision.decision_engine.get_settings",
+        lambda: SimpleNamespace(ES_TOP_K_DOCS=7, FAISS_TOP_K_DOCS=13),
+    )
 
     response = await engine.decide("我可以吃海鲜吗？")
 
@@ -64,5 +69,5 @@ async def test_decision_engine_reranks_candidates_and_selects_systems() -> None:
     assert response.decisions[0].selected is True
     assert response.decisions[0].reranker_score == 0.91
     assert reranker.calls == [("我可以吃海鲜吗？", ["memo_1"])]
-    assert keyword_retriever.requested_top_k == [get_settings().DEFAULT_TOP_K_DOCS]
-    assert vector_retriever.requested_top_k == [get_settings().DEFAULT_TOP_K_DOCS]
+    assert keyword_retriever.requested_top_k == [7]
+    assert vector_retriever.requested_top_k == [13]

@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = 512
 
-    DEFAULT_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
+    ES_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
+    FAISS_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
     FAISS_PREFERRED_SCORE_THRESHOLD: float = Field(default=0.60, ge=-1.0, le=1.0)
     FAISS_MIN_SCORE_THRESHOLD: float = Field(default=0.30, ge=-1.0, le=1.0)
     FAISS_TARGET_HITS: int = Field(default=10, ge=1, le=1000)
@@ -59,8 +60,8 @@ class Settings(BaseSettings):
                 "FAISS_MIN_SCORE_THRESHOLD must not exceed "
                 "FAISS_PREFERRED_SCORE_THRESHOLD"
             )
-        if self.FAISS_TARGET_HITS > self.DEFAULT_TOP_K_DOCS:
-            raise ValueError("FAISS_TARGET_HITS must not exceed DEFAULT_TOP_K_DOCS")
+        if self.FAISS_TARGET_HITS > self.FAISS_TOP_K_DOCS:
+            raise ValueError("FAISS_TARGET_HITS must not exceed FAISS_TOP_K_DOCS")
         return self
 
 
