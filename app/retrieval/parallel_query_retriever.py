@@ -176,8 +176,13 @@ def _hit_sort_key(hit: SearchHit, channel: Channel) -> tuple[float, float, float
             hit.bm25_score_norm if hit.bm25_score_norm is not None else float("-inf")
         )
         rank = float(hit.bm25_rank) if hit.bm25_rank is not None else float("inf")
-        raw_score = hit.bm25_score if hit.bm25_score is not None else float("-inf")
-        return -normalized_score, rank, -raw_score, hit.doc_id
+        query_indexes = hit.metadata.get("matched_query_indexes")
+        query_index = (
+            float(query_indexes[0])
+            if isinstance(query_indexes, list) and query_indexes
+            else float("inf")
+        )
+        return -normalized_score, rank, query_index, hit.doc_id
 
     score = hit.vector_score if hit.vector_score is not None else float("-inf")
     rank = float(hit.vector_rank) if hit.vector_rank is not None else float("inf")
