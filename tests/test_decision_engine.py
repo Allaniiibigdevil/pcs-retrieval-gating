@@ -15,7 +15,7 @@ class FakeRetriever:
 
 
 @pytest.mark.asyncio
-async def test_decision_engine_returns_selected_systems() -> None:
+async def test_decision_engine_returns_selected_systems_and_queries() -> None:
     engine = DecisionEngine(
         keyword_retriever=FakeRetriever([]),
         vector_retriever=FakeRetriever(
@@ -34,6 +34,7 @@ async def test_decision_engine_returns_selected_systems() -> None:
 
     response = await engine.decide("我可以吃海鲜吗？")
 
+    assert response.rewritten_queries == ["我可以吃海鲜吗？"]
     assert response.selected_systems == ["notepad"]
     assert response.decisions[0].system_id == "notepad"
     assert response.decisions[0].selected is True
