@@ -1,7 +1,8 @@
 const defaultSettings = {
   apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
-  topKDocs: 50,
-  maxSystems: 5,
+  esTopKDocs: 50,
+  faissTopKDocs: 50,
+  evidenceDocsPerSystem: 3,
   threshold: 0.6,
   esWeight: 0.55,
   agreementWeight: 0.2,
@@ -26,7 +27,7 @@ const jsonlExample = document.querySelector("#jsonlExample");
 
 function loadSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v4") || "{}");
+    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v5") || "{}");
     return { ...defaultSettings, ...saved };
   } catch {
     return { ...defaultSettings };
@@ -34,7 +35,7 @@ function loadSettings() {
 }
 
 function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v4", JSON.stringify(state.settings));
+  localStorage.setItem("rg.settingsDraft.v5", JSON.stringify(state.settings));
 }
 
 function switchView(name) {
@@ -71,7 +72,6 @@ function highlightPlainText(value, terms = []) {
   if (!text || !uniqueTerms.length) {
     return escapeHtml(text);
   }
-
   const pattern = uniqueTerms.map(escapeRegExp).join("|");
   return escapeHtml(text).replace(new RegExp(`(${pattern})`, "gi"), '<span style="color: #dc2626; font-weight: 700;">$1</span>');
 }
@@ -93,7 +93,6 @@ function renderKeywordBadges(keywords = [], matchedKeywords = [], highlight = {}
   const highlightedKeywords = new Map(
     (highlight.keywords || []).map((item) => [String(item).replaceAll("<em>", "").replaceAll("</em>", ""), item]),
   );
-
   return (keywords || [])
     .map((item) => {
       const highlighted = highlightedKeywords.get(item);
@@ -117,13 +116,8 @@ async function postDecide(task) {
   const response = await fetch(`${state.settings.apiBase.replace(/\/$/, "")}/v1/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      task,
-      top_k_docs: Number(state.settings.topKDocs),
-      max_systems: Number(state.settings.maxSystems),
-    }),
+    body: JSON.stringify({ task }),
   });
-
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `HTTP ${response.status}`);
@@ -133,11 +127,12 @@ async function postDecide(task) {
 
 function renderDecision(data) {
   const selected = data.selected_systems || [];
+  const queries = data.rewritten_queries || [];
   selectedSummary.textContent = selected.length ? `选中：${selected.join(", ")}` : "未选中系统";
   selectedSummary.classList.toggle("has-selection", selected.length > 0);
 
   const totalMs = Object.values(data.latency_ms || {}).reduce((sum, value) => sum + Number(value || 0), 0);
-  latencyText.textContent = totalMs ? `${totalMs.toFixed(1)} ms` : "-";
+  latencyText.textContent = totalMs ? `${totalMs.toFixed(1)} ms · ${queries.length} queries` : `${queries.length} queries`;
 
   if (!data.decisions?.length) {
     systemList.innerHTML = `<div class="empty-state">暂无候选系统</div>`;
@@ -148,8 +143,9 @@ function renderDecision(data) {
     .map((item) => {
       const width = Math.max(0, Math.min(100, Number(item.confidence || 0) * 100));
       const evidence = (item.evidence_docs || [])
-        .map(
-          (doc) => `
+        .map((doc) => {
+          const matchedQueries = (doc.matched_queries || []).map(escapeHtml).join(" · ");
+          return `
             <article class="doc-card evidence-doc-card">
               <div class="doc-topline">
                 <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
@@ -159,10 +155,11 @@ function renderDecision(data) {
               <div class="keyword-list">
                 ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
               </div>
-              <div class="doc-meta">BM25 ${formatNumber(doc.bm25_score)} / Vector ${formatNumber(doc.vector_score)}</div>
+              <div class="doc-meta">ES raw ${formatNumber(doc.bm25_score)} / ES norm ${formatNumber(doc.bm25_score_norm)} / Vector ${formatNumber(doc.vector_score)}</div>
+              ${matchedQueries ? `<div class="doc-meta">queries: ${matchedQueries}</div>` : ""}
             </article>
-          `,
-        )
+          `;
+        })
         .join("");
 
       return `
@@ -173,15 +170,9 @@ function renderDecision(data) {
           </div>
           <div class="confidence">
             <div class="meter"><span style="width:${width}%"></span></div>
-            <div class="score-line">
-              <strong>${formatNumber(item.confidence)}</strong>
-              <span>confidence</span>
-            </div>
+            <div class="score-line"><strong>${formatNumber(item.confidence)}</strong><span>confidence</span></div>
           </div>
-          <div class="evidence">
-            <strong>证据</strong>
-            <div class="evidence-list">${evidence || "<div>无</div>"}</div>
-          </div>
+          <div class="evidence"><strong>证据</strong><div class="evidence-list">${evidence || "<div>无</div>"}</div></div>
         </article>
       `;
     })
@@ -190,60 +181,39 @@ function renderDecision(data) {
 
 function parseDocsText(text) {
   const trimmed = text.trim();
-  if (!trimmed) {
-    return [];
-  }
-
-  return trimmed
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  if (!trimmed) return [];
+  return trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line));
 }
 
 function renderDocs() {
   const keyword = docsFilterInput.value.trim().toLowerCase();
   const docs = state.docs.filter((doc) => {
-    const text = [
-      doc.doc_id,
-      doc.system_id,
-      doc.summary,
-      ...(doc.keywords || []),
-      JSON.stringify(doc.metadata || {}),
-    ]
+    const text = [doc.doc_id, doc.system_id, doc.summary, ...(doc.keywords || []), JSON.stringify(doc.metadata || {})]
       .join(" ")
       .toLowerCase();
     return !keyword || text.includes(keyword);
   });
-
   if (!docs.length) {
     docsGrid.innerHTML = `<div class="empty-state">暂无 docs</div>`;
     return;
   }
-
   docsGrid.innerHTML = docs
-    .map(
-      (doc) => `
-        <article class="doc-card">
-          <div class="doc-topline">
-            <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
-            <span class="badge system-badge">${escapeHtml(doc.system_id)}</span>
-          </div>
-          <div class="doc-summary">${escapeHtml(doc.summary || "")}</div>
-          <div class="keyword-list">
-            ${renderKeywordBadges(doc.keywords || [], [], doc.metadata?.highlight || {})}
-          </div>
-          <div class="doc-meta">${escapeHtml(JSON.stringify(doc.metadata || {}))}</div>
-        </article>
-      `,
-    )
+    .map((doc) => `
+      <article class="doc-card">
+        <div class="doc-topline"><div class="doc-id">${escapeHtml(doc.doc_id)}</div><span class="badge system-badge">${escapeHtml(doc.system_id)}</span></div>
+        <div class="doc-summary">${escapeHtml(doc.summary || "")}</div>
+        <div class="keyword-list">${renderKeywordBadges(doc.keywords || [], [], doc.metadata?.highlight || {})}</div>
+        <div class="doc-meta">${escapeHtml(JSON.stringify(doc.metadata || {}))}</div>
+      </article>
+    `)
     .join("");
 }
 
 function fillSettingsForm() {
   document.querySelector("#apiBaseInput").value = state.settings.apiBase;
-  document.querySelector("#topKInput").value = state.settings.topKDocs;
-  document.querySelector("#maxSystemsInput").value = state.settings.maxSystems;
+  document.querySelector("#esTopKInput").value = state.settings.esTopKDocs;
+  document.querySelector("#faissTopKInput").value = state.settings.faissTopKDocs;
+  document.querySelector("#evidenceDocsInput").value = state.settings.evidenceDocsPerSystem;
   document.querySelector("#thresholdInput").value = state.settings.threshold;
   document.querySelector("#esWeightInput").value = state.settings.esWeight;
   document.querySelector("#agreementWeightInput").value = state.settings.agreementWeight;
@@ -255,16 +225,13 @@ function fillSettingsForm() {
 function readSettingsForm() {
   state.settings = {
     apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
-    topKDocs: Number(document.querySelector("#topKInput").value || defaultSettings.topKDocs),
-    maxSystems: Number(document.querySelector("#maxSystemsInput").value || defaultSettings.maxSystems),
+    esTopKDocs: Number(document.querySelector("#esTopKInput").value || defaultSettings.esTopKDocs),
+    faissTopKDocs: Number(document.querySelector("#faissTopKInput").value || defaultSettings.faissTopKDocs),
+    evidenceDocsPerSystem: Number(document.querySelector("#evidenceDocsInput").value || defaultSettings.evidenceDocsPerSystem),
     threshold: Number(document.querySelector("#thresholdInput").value || defaultSettings.threshold),
     esWeight: Number(document.querySelector("#esWeightInput").value || defaultSettings.esWeight),
-    agreementWeight: Number(
-      document.querySelector("#agreementWeightInput").value || defaultSettings.agreementWeight,
-    ),
-    semanticThreshold: Number(
-      document.querySelector("#semanticThresholdInput").value || defaultSettings.semanticThreshold,
-    ),
+    agreementWeight: Number(document.querySelector("#agreementWeightInput").value || defaultSettings.agreementWeight),
+    semanticThreshold: Number(document.querySelector("#semanticThresholdInput").value || defaultSettings.semanticThreshold),
     lexicalThreshold: Number(document.querySelector("#lexicalThresholdInput").value || defaultSettings.lexicalThreshold),
   };
   saveSettingsDraft();
@@ -273,8 +240,9 @@ function readSettingsForm() {
 
 function buildEnvPreview() {
   return [
-    `DEFAULT_TOP_K_DOCS=${state.settings.topKDocs}`,
-    `DEFAULT_MAX_SYSTEMS=${state.settings.maxSystems}`,
+    `ES_TOP_K_DOCS=${state.settings.esTopKDocs}`,
+    `FAISS_TOP_K_DOCS=${state.settings.faissTopKDocs}`,
+    `EVIDENCE_DOCS_PER_SYSTEM=${state.settings.evidenceDocsPerSystem}`,
     `SYSTEM_SELECTION_THRESHOLD=${state.settings.threshold}`,
     `ES_SCORE_WEIGHT=${state.settings.esWeight}`,
     `AGREEMENT_WEIGHT=${state.settings.agreementWeight}`,
@@ -298,27 +266,22 @@ async function checkHealth() {
   }
 }
 
-navItems.forEach((item) => {
-  item.addEventListener("click", () => switchView(item.dataset.view));
-});
+navItems.forEach((item) => item.addEventListener("click", () => switchView(item.dataset.view)));
 
 document.querySelector("#decideForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = document.querySelector("#taskInput");
   const task = input.value.trim();
-  if (!task) {
-    return;
-  }
-
+  if (!task) return;
   addMessage("user", task);
   input.value = "";
   addMessage("assistant", "生成中...");
-
   try {
     const data = await postDecide(task);
+    const queryText = (data.rewritten_queries || []).join(" / ");
     messageList.lastElementChild.textContent = data.selected_systems?.length
-      ? `建议检索：${data.selected_systems.join(", ")}`
-      : "没有选中子系统";
+      ? `建议检索：${data.selected_systems.join(", ")}；queries：${queryText}`
+      : `没有选中子系统；queries：${queryText}`;
     renderDecision(data);
   } catch (error) {
     messageList.lastElementChild.textContent = `请求失败：${error.message}`;
@@ -328,12 +291,9 @@ document.querySelector("#decideForm").addEventListener("submit", async (event) =
 
 document.querySelector("#docsFileInput").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-  const text = await file.text();
+  if (!file) return;
   try {
-    state.docs = parseDocsText(text);
+    state.docs = parseDocsText(await file.text());
     jsonlExample.open = false;
     renderDocs();
   } catch (error) {
@@ -344,9 +304,7 @@ document.querySelector("#docsFileInput").addEventListener("change", async (event
 document.querySelector("#loadExampleButton").addEventListener("click", async () => {
   try {
     const response = await fetch("./sample-docs.jsonl");
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.docs = parseDocsText(await response.text());
     jsonlExample.open = false;
     renderDocs();
@@ -358,12 +316,8 @@ document.querySelector("#loadExampleButton").addEventListener("click", async () 
 docsFilterInput.addEventListener("input", renderDocs);
 
 document
-  .querySelectorAll(
-    "#apiBaseInput, #topKInput, #maxSystemsInput, #thresholdInput, #esWeightInput, #agreementWeightInput, #semanticThresholdInput, #lexicalThresholdInput",
-  )
-  .forEach((input) => {
-    input.addEventListener("input", readSettingsForm);
-  });
+  .querySelectorAll("#apiBaseInput, #esTopKInput, #faissTopKInput, #evidenceDocsInput, #thresholdInput, #esWeightInput, #agreementWeightInput, #semanticThresholdInput, #lexicalThresholdInput")
+  .forEach((input) => input.addEventListener("input", readSettingsForm));
 
 document.querySelector("#copyEnvButton").addEventListener("click", async () => {
   readSettingsForm();
