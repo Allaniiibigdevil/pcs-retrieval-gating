@@ -12,6 +12,7 @@ class SearchHit(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     bm25_score: float | None = None
+    bm25_score_norm: float | None = None
     bm25_rank: int | None = None
 
     vector_score: float | None = None
