@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Literal
 
+from app.config import get_settings
 from app.retrieval.factory import Retriever
 from app.schemas.search import SearchHit
 
@@ -117,19 +118,23 @@ def _prepare_query_hits(
     channel: Channel,
 ) -> list[SearchHit]:
     max_keyword_score = 0.0
+    query_es_weight = 1.0
     if channel == "keyword":
         max_keyword_score = max((hit.bm25_score or 0.0 for hit in hits), default=0.0)
+        if query_index > 0:
+            query_es_weight = get_settings().REWRITTEN_QUERY_ES_WEIGHT
 
     prepared: list[SearchHit] = []
     for hit in hits:
         copied = hit.model_copy(deep=True)
         if channel == "keyword":
             score = copied.bm25_score or 0.0
-            copied.bm25_score_norm = (
+            score_norm = (
                 min(max(score / max_keyword_score, 0.0), 1.0)
                 if score > 0.0 and max_keyword_score > 0.0
                 else 0.0
             )
+            copied.bm25_score_norm = score_norm * query_es_weight
         copied.metadata = _merge_metadata(
             copied.metadata,
             {
