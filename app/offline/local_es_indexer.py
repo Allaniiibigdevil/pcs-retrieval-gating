@@ -5,6 +5,18 @@ from app.config import get_settings
 from app.schemas.doc import SourceDoc
 
 
+class ElasticsearchRequestError(RuntimeError):
+    def __init__(self, method: str, path: str, status_code: int, response_body: str) -> None:
+        self.method = method
+        self.path = path
+        self.status_code = status_code
+        self.response_body = response_body
+        detail = response_body or "<empty response body>"
+        super().__init__(
+            f"Elasticsearch {method} {path} failed with HTTP {status_code}: {detail}"
+        )
+
+
 class LocalElasticsearchIndexer:
     def __init__(self, base_url: str | None = None, index_name: str | None = None) -> None:
         settings = get_settings()
@@ -70,8 +82,8 @@ class LocalElasticsearchIndexer:
     def _delete_index_if_exists(self) -> None:
         try:
             self._request("DELETE", f"/{self.index_name}")
-        except error.HTTPError as exc:
-            if exc.code != 404:
+        except ElasticsearchRequestError as exc:
+            if exc.status_code != 404:
                 raise
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
@@ -92,6 +104,15 @@ class LocalElasticsearchIndexer:
             method=method,
             headers={"Content-Type": content_type},
         )
-        with request.urlopen(req, timeout=self.settings.LOCAL_ES_TIMEOUT_SECONDS) as response:
-            payload = response.read().decode("utf-8")
+        try:
+            with request.urlopen(req, timeout=self.settings.LOCAL_ES_TIMEOUT_SECONDS) as response:
+                payload = response.read().decode("utf-8")
+        except error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="replace").strip()
+            raise ElasticsearchRequestError(
+                method=method,
+                path=path,
+                status_code=exc.code,
+                response_body=response_body,
+            ) from exc
         return json.loads(payload) if payload else {}
