@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     ES_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
     FAISS_TOP_K_DOCS: int = Field(default=50, ge=1, le=1000)
     EVIDENCE_DOCS_PER_SYSTEM: int = Field(default=3, ge=1, le=100)
+    REWRITTEN_QUERY_ES_WEIGHT: float = Field(default=1.0, ge=0.0, le=1.0)
 
     SYSTEM_SELECTION_THRESHOLD: float = Field(default=0.60, ge=0.0, le=1.0)
     ES_SCORE_WEIGHT: float = Field(default=0.55, ge=0.0, le=1.0)
