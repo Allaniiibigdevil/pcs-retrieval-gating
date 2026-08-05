@@ -1,8 +1,12 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
-from app.retrieval.parallel_query_retriever import search_queries_in_parallel
+from app.retrieval.parallel_query_retriever import (
+    _prepare_query_hits,
+    search_queries_in_parallel,
+)
 from app.schemas.search import SearchHit
 
 
@@ -75,6 +79,37 @@ async def test_all_keyword_and_vector_queries_run_concurrently() -> None:
     assert tracker.peak == 4
     assert len(result.keyword.hits) == 2
     assert len(result.vector.hits) == 2
+
+
+def test_rewritten_query_es_weight_applies_only_after_original(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.retrieval.parallel_query_retriever.get_settings",
+        lambda: SimpleNamespace(REWRITTEN_QUERY_ES_WEIGHT=0.5),
+    )
+    source = [
+        SearchHit(
+            doc_id="shared",
+            system_id="system",
+            bm25_score=10.0,
+            bm25_rank=1,
+        )
+    ]
+
+    original = _prepare_query_hits(
+        source,
+        query="original",
+        query_index=0,
+        channel="keyword",
+    )
+    rewritten = _prepare_query_hits(
+        source,
+        query="rewrite",
+        query_index=1,
+        channel="keyword",
+    )
+
+    assert original[0].bm25_score_norm == pytest.approx(1.0)
+    assert rewritten[0].bm25_score_norm == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
