@@ -1,94 +1,81 @@
 # Retrieval Gating Service
 
-这是一个本地优先的检索门控原型服务。它的目标不是给文档做最终排序，而是根据当前用户任务判断应该检索哪些子系统。
+这是一个本地优先的检索门控原型。目标不是做最终文档排序，而是根据用户任务判断应该检索哪些 `system_id`。
 
 ```text
 用户任务
-  -> ES / FAISS 找到相关文档证据
+  -> query rewrite
+  -> 多 query 并行执行 ES / FAISS 检索
+  -> 同通道按 doc_id 聚合
+  -> ES + FAISS 证据融合
   -> 聚合到 system_id
   -> 输出 selected_systems
 ```
 
-当前分支只维护本地模式：使用本地 Elasticsearch 做词法检索，使用本地 FAISS 做向量检索，不实现远端 Elasticsearch 和 GaussDB 路径。
+当前分支使用本地 Elasticsearch 做词法检索、本地 FAISS 做向量检索，embedding 默认使用 `BAAI/bge-small-zh-v1.5`。
 
-## 当前实现
+## 查询与召回
 
-本地链路：
+`rewrite_queries()` 当前是占位实现，默认返回原始 task。后续可以返回多个改写 query。所有 ES 和 FAISS 查询会并行执行；单个 query 失败不会中断其他查询，只有两个通道全部失败时才返回错误。
 
-```text
-离线灌入 SourceDoc
-  -> 构建本地 Elasticsearch 词法索引
-  -> 使用 BGE 生成文档向量
-  -> 构建本地 FAISS 索引
-  -> 在线 FastAPI 查询本地 ES 并加载本地 FAISS artifacts
-  -> /v1/decide 输出需要检索的子系统列表
-```
-
-本地模式特征：
-
-- 不提供实时文档写入接口。
-- 文档通过离线命令灌入和建索引。
-- 词法检索使用本地 Elasticsearch。
-- 向量检索使用本地 FAISS artifact。
-- embedding 默认使用 `BAAI/bge-small-zh-v1.5`。
-- `/v1/decide` 的核心输出是 `selected_systems`。
-
-## 目录结构
+ES 查询参数与 `rrf` / `reranker` 分支保持一致：
 
 ```text
-app/
-  api/            FastAPI 路由
-  decision/       query 处理、证据增强、系统聚合、决策引擎
-  embedding/      mock embedding 和 BGE embedding
-  offline/        本地离线灌入和索引构建命令
-  retrieval/      本地 ES、本地 FAISS、候选合并、retriever factory
-  schemas/        Pydantic 请求 / 响应模型
-  storage/        本地 JSONL 文档存储和 artifact 存储
-  utils/          计时等工具
-
-data/
-  raw/            本地原始文档，git 忽略
-  artifacts/      生成的 FAISS artifacts，git 忽略
-
-examples/         示例 SourceDoc 输入
-tests/            单元测试
+multi_match.type = cross_fields
+operator = or
+minimum_should_match = 1<2
+summary boost = 1.0
+keywords boost = 1.0
 ```
 
-## 使用 uv 准备环境
-
-推荐 Python 3.11：
-
-```bash
-uv python install 3.11
-uv venv --python 3.11 --clear
-uv sync --extra dev
-```
-
-如果 Windows 上全局 cache 或 Python 安装目录有权限问题，可以放到项目目录内：
-
-```powershell
-$env:UV_CACHE_DIR='D:\Code\Python\pcs-retrieval-gating\.uv-cache'
-$env:UV_PYTHON_INSTALL_DIR='D:\Code\Python\pcs-retrieval-gating\.uv-python'
-uv sync --extra dev
-```
-
-## 配置
-
-`.env.example` 中包含主要配置：
+ES 和 FAISS 的 top-k 分开配置：
 
 ```env
-APP_MODE=local
-EMBEDDING_PROVIDER=bge
-EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
-EMBEDDING_DIM=512
-LOCAL_RAW_DOCS_PATH=data/raw/docs.jsonl
-LOCAL_ARTIFACT_DIR=data/artifacts
-LOCAL_ES_URL=http://127.0.0.1:9200
-LOCAL_ES_INDEX=pcs_retrieval_docs
-LOCAL_ES_ANALYZER=standard
-LOCAL_ES_SEARCH_ANALYZER=standard
-LOCAL_ES_INDEX_ON_BUILD=false
+ES_TOP_K_DOCS=50
+FAISS_TOP_K_DOCS=50
+EVIDENCE_DOCS_PER_SYSTEM=3
+```
 
+当前 score-fusion 分支**不对 FAISS 结果设置最低分或自适应阈值**。原因是最终决策直接使用向量分，并且 agreement 另有最低语义门槛；过早删除中等向量分会让原本的双路证据退化成 ES-only。
+
+## 多 query 聚合
+
+不同 rewrite 的 ES `_score` 不直接横向比较。每个 query 内先归一化：
+
+```text
+bm25_score_norm_q(d) = bm25_score_q(d) / max_x bm25_score_q(x)
+```
+
+同一文档跨 rewrite 聚合：
+
+```text
+lexical(d) = max_q bm25_score_norm_q(d)
+semantic(d) = max_q clamp(vector_score_q(d), 0, 1)
+```
+
+原始 ES `_score` 保留在 `bm25_score`，归一化结果保存在 `bm25_score_norm`。响应中的 `matched_queries` 会列出命中过该文档的 rewrite query。
+
+## 评分公式
+
+```text
+base_score = max(
+  semantic,
+  ES_SCORE_WEIGHT * lexical
+)
+
+agreement_score = AGREEMENT_WEIGHT * sqrt(semantic * lexical)
+  if semantic >= SEMANTIC_MATCH_THRESHOLD
+  and lexical >= LEXICAL_MATCH_THRESHOLD
+  else 0
+
+doc_strength = clamp(base_score + agreement_score, 0, 1)
+system_confidence = max(doc_strength of docs in the system)
+selected = system_confidence >= SYSTEM_SELECTION_THRESHOLD
+```
+
+默认配置：
+
+```env
 SYSTEM_SELECTION_THRESHOLD=0.60
 ES_SCORE_WEIGHT=0.55
 AGREEMENT_WEIGHT=0.20
@@ -96,86 +83,21 @@ SEMANTIC_MATCH_THRESHOLD=0.30
 LEXICAL_MATCH_THRESHOLD=0.30
 ```
 
-## 查询处理
-
-ES 词法检索和向量检索都保留用户原始 query 语义。应用层只去掉首尾空白并合并多余空白，不删除停用词、不做同义词替换、不做大小写归一化。
-
-原因：
-
-- ES 是词法检索，分词、大小写归一化、同义词、停用词和领域词配置应由 ES analyzer 统一承接，避免应用层改写 query 导致 ES `_score` 难以复现。
-- BGE embedding 是语义检索，应该保留原始 query 的语义连贯性。
-- 文档 embedding 使用原始 `summary` 和 `keywords` 构造，不做停用词删除。
-
-线上词法检索和优先证据关键词匹配由本地 ES 提供：ES 检索会请求 `keywords` / `summary` highlight，并优先使用 `keywords` highlight 生成 `matched_keywords`。ES analyzer 默认使用 `standard`，如果本地 ES 安装了 IK 或自定义同义词 / 停用词 / 领域词 analyzer，可以通过 `LOCAL_ES_ANALYZER` 和 `LOCAL_ES_SEARCH_ANALYZER` 切换。
-
-ES 证据匹配由 ES analyzer 决定。修改 ES analyzer 词表后，建议用 `--index-es` 重新构建 ES 索引。
-
-## 评分机制
-
-当前评分是 MVP 规则，不是训练出来的模型。ES 词法 `_score` 会暂存到兼容字段 `bm25_score`，只在当前 query 的候选集合内归一化：
-
-```text
-vector_score_norm = clamp(vector_score, 0, 1)
-es_score_norm = es_score / max_es_score_in_candidates
-```
-
-单文档强度：
-
-```text
-base_score = max(vector_score_norm, ES_SCORE_WEIGHT * es_score_norm)
-agreement_score = AGREEMENT_WEIGHT * sqrt(vector_score_norm * es_score_norm) if (
-  vector_score_norm >= SEMANTIC_MATCH_THRESHOLD
-  and es_score_norm >= LEXICAL_MATCH_THRESHOLD
-) else 0
-doc_strength = clamp(
-  base_score + agreement_score,
-  0,
-  1
-)
-```
-
-说明：
-
-- `vector_score_norm`：向量相似度，负数按 0 处理，正数按 0 到 1 使用。
-- `es_score_norm`：ES 分在当前 query 候选集内的相对强度，最高分为 1，不用于跨 query 比较。
-- `base_score`：取向量分和加权 ES 分的较大值，任意一路强命中都能作为基础证据。
-- `ES_SCORE_WEIGHT`：限制 ES 单路第一名的最高基础贡献，避免其因归一化为 1 而自动入选。
-- `agreement_score`：同一文档被两路命中且均达到最低门槛时，按两路分数几何平均给予连续奖励。
-- `AGREEMENT_WEIGHT`：一致性奖励的系数。
-- 每个 `system_id` 的 `confidence` 使用该系统下最强证据文档的 `doc_strength`。
-- `confidence >= SYSTEM_SELECTION_THRESHOLD` 时，该系统进入 `selected_systems`。
-
-## 离线灌入和建索引
-
-直接使用示例文档构建本地 FAISS artifacts：
+## 离线建索引
 
 ```bash
 uv run python -m app.offline.build_index --docs examples/docs.jsonl
 ```
 
-如果本地 ES 已启动，并希望同步重建 ES 词法索引：
+同时重建本地 ES 索引：
 
 ```bash
 uv run python -m app.offline.build_index --docs examples/docs.jsonl --index-es
 ```
 
-也可以先灌入到本地 raw store，再构建索引：
+FAISS 使用归一化 BGE embedding 和 `IndexFlatIP`。
 
-```bash
-uv run python -m app.offline.ingest examples/docs.jsonl
-uv run python -m app.offline.build_index
-```
-
-构建完成后会生成：
-
-```text
-data/artifacts/docs.jsonl
-data/artifacts/faiss.index
-data/artifacts/faiss_doc_ids.json
-data/artifacts/manifest.json
-```
-
-## 启动服务
+## 启动
 
 ```bash
 uv run uvicorn app.main:app --reload
@@ -187,121 +109,33 @@ uv run uvicorn app.main:app --reload
 curl http://127.0.0.1:8000/health
 ```
 
-预期返回：
-
-```json
-{"status":"ok"}
-```
-
 前端控制台：
 
 ```text
 http://127.0.0.1:8000/frontend/
 ```
 
-## 调试检索接口
-
-ES 词法检索：
+## 决策接口
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/search/bm25 ^
-  -H "Content-Type: application/json" ^
-  -d "{\"query\":\"我可以吃海鲜吗\",\"top_k\":5}"
+curl -X POST http://127.0.0.1:8000/v1/decide \
+  -H "Content-Type: application/json" \
+  -d '{"task_id":"task_001","task":"我可以吃海鲜吗？"}'
 ```
 
-兼容接口：
+响应包含：
 
-```text
-/v1/search/es
-```
+- `rewritten_queries`：本次实际执行的 query 列表；
+- `selected_systems`：最终建议检索的系统；
+- `decisions`：所有候选系统的 confidence 和证据；
+- `evidence_docs[].bm25_score`：原始 ES `_score`；
+- `evidence_docs[].bm25_score_norm`：query 内归一化词法分；
+- `evidence_docs[].matched_queries`：命中过该文档的 rewrite query。
 
-在 `local` 模式下，`/v1/search/bm25` 和 `/v1/search/es` 都会走本地 ES 词法检索。
-
-向量检索：
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/search/vector ^
-  -H "Content-Type: application/json" ^
-  -d "{\"query\":\"我可以吃海鲜吗\",\"top_k\":5}"
-```
-
-## 子系统选择接口
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/decide ^
-  -H "Content-Type: application/json" ^
-  -d "{\"task_id\":\"task_001\",\"task\":\"我可以吃海鲜吗？\",\"top_k_docs\":50,\"max_systems\":5}"
-```
-
-返回示例：
-
-```json
-{
-  "task_id": "task_001",
-  "task": "我可以吃海鲜吗？",
-  "selected_systems": ["notepad"],
-  "decisions": [
-    {
-      "system_id": "notepad",
-      "selected": true,
-      "confidence": 0.84,
-      "evidence_docs": [
-        {
-          "doc_id": "3",
-          "summary": "记录了用户对海鲜过敏",
-          "keywords": ["海鲜过敏", "饮食禁忌"],
-          "matched_keywords": ["海鲜过敏"],
-          "highlight": {
-            "summary": ["记录了用户对<em>海鲜</em>过敏"],
-            "keywords": ["<em>海鲜过敏</em>"]
-          },
-          "bm25_score": 1.2,
-          "vector_score": 0.84,
-          "bm25_rank": 1,
-          "vector_rank": 1
-        }
-      ]
-    }
-  ],
-  "latency_ms": {}
-}
-```
-
-字段含义：
-
-- `selected_systems`：最终建议检索的子系统名称列表，这是主要输出。
-- `decisions`：候选子系统的解释信息，用于调试和观察。
-- `selected`：该候选系统是否进入 `selected_systems`。
-- `confidence`：该系统最强证据文档的强度分。
-- `evidence_docs`：该系统下用于解释的最多 3 个证据文档。
-
-## 测试和检查
-
-运行单元测试：
+## 检查
 
 ```bash
 uv run pytest -p no:cacheprovider
-```
-
-运行 Ruff：
-
-```bash
 uv run ruff check --no-cache .
-```
-
-编译检查：
-
-```powershell
-$env:PYTHONPYCACHEPREFIX='D:\Code\Python\pcs-retrieval-gating\.pycache-tmp'
 uv run python -m compileall app tests
 ```
-
-## MVP 说明
-
-- 本地模式使用本地 ES，不使用 GaussDB。
-- 本地模式不提供实时文档写入接口。
-- 文档更新后需要重新运行离线索引构建。
-- 词法检索使用本地 ES analyzer；关键词证据优先来自 ES highlight，并在决策证据中返回 `highlight` 供前端红色高亮命中的摘要片段和关键词。
-- 向量检索使用原始 query，不做停用词删除。
-- 当前 scoring 是 MVP 规则，后续可以替换成更可控的打分模型。
-- 最终输出目标是子系统选择，不是文档排序。
