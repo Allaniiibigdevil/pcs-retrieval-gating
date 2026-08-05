@@ -1,5 +1,8 @@
+import asyncio
+
 import numpy as np
 
+from app.config import get_settings
 from app.embedding.embedding_service import EmbeddingService, get_embedding_service
 from app.schemas.doc import SourceDoc
 from app.schemas.search import SearchHit
@@ -36,7 +39,26 @@ class LocalFaissRetriever:
 
         query_embedding = await self.embedding_service.embed(query)
         vector = np.asarray([query_embedding], dtype="float32")
-        scores, indices = self._index.search(vector, min(top_k, len(self._doc_ids)))
+        if vector.ndim != 2 or vector.shape[0] != 1:
+            raise RuntimeError(
+                f"Query embedding must have shape (1, d), received {vector.shape}"
+            )
+        index_dim = int(self._index.d)
+        query_dim = int(vector.shape[1])
+        if query_dim != index_dim:
+            model_path = get_settings().EMBEDDING_MODEL_PATH
+            raise RuntimeError(
+                "FAISS index dimension mismatch: "
+                f"index dimension is {index_dim}, query embedding dimension is {query_dim}, "
+                f"configured model is {model_path!r}. Rebuild the FAISS artifacts with "
+                "`uv run python -m app.offline.build_index` and restart the service, or restore "
+                "the embedding model recorded in data/artifacts/manifest.json."
+            )
+        scores, indices = await asyncio.to_thread(
+            self._index.search,
+            vector,
+            min(top_k, len(self._doc_ids)),
+        )
 
         hits: list[SearchHit] = []
         for rank, (score, index) in enumerate(zip(scores[0], indices[0]), start=1):
