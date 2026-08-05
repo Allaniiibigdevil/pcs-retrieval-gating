@@ -15,7 +15,7 @@ class FakeLocalElasticsearchRetriever(LocalElasticsearchRetriever):
         return self.response
 
 
-def test_local_es_retriever_uses_highlight_for_matched_keywords() -> None:
+def test_local_es_retriever_uses_rrf_query_shape_and_highlights() -> None:
     retriever = FakeLocalElasticsearchRetriever(
         {
             "hits": {
@@ -40,10 +40,16 @@ def test_local_es_retriever_uses_highlight_for_matched_keywords() -> None:
         }
     )
 
-    hits = asyncio.run(retriever.search("海鲜", top_k=5))
+    hits = asyncio.run(retriever.search("海鲜 过敏", top_k=5))
 
     assert retriever.request_body is not None
-    assert "search_text" not in " ".join(retriever.fields)
-    assert retriever.request_body["highlight"]["fields"]["keywords"] == {"number_of_fragments": 0}
+    query = retriever.request_body["query"]["multi_match"]
+    assert query["type"] == "cross_fields"
+    assert query["operator"] == "or"
+    assert query["minimum_should_match"] == "1<2"
+    assert retriever.fields == ["summary^1.0", "keywords^1.0"]
+    assert retriever.request_body["highlight"]["fields"]["keywords"] == {
+        "number_of_fragments": 0
+    }
     assert hits[0].metadata["matched_keywords"] == ["海鲜过敏"]
     assert hits[0].metadata["highlight"]["summary"] == ["记录了用户对<em>海鲜</em>过敏"]
