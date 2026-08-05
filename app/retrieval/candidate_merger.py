@@ -20,6 +20,51 @@ class CandidateMerger:
                 existing.summary = hit.summary
             if not existing.keywords:
                 existing.keywords = list(hit.keywords)
-            existing.metadata = {**hit.metadata, **existing.metadata}
+            existing.metadata = _merge_metadata(existing.metadata, hit.metadata)
 
         return list(merged.values())
+
+
+def _merge_metadata(primary: dict, secondary: dict) -> dict:
+    merged = {**secondary, **primary}
+
+    for field in ("matched_queries", "matched_query_indexes", "matched_keywords"):
+        values: list = []
+        seen: set = set()
+        for source in (primary, secondary):
+            raw_values = source.get(field)
+            if not isinstance(raw_values, list):
+                continue
+            for value in raw_values:
+                if value in seen:
+                    continue
+                seen.add(value)
+                values.append(value)
+        if values:
+            merged[field] = values
+
+    primary_highlight = primary.get("highlight")
+    secondary_highlight = secondary.get("highlight")
+    if isinstance(primary_highlight, dict) or isinstance(secondary_highlight, dict):
+        highlight: dict[str, list[str]] = {}
+        for field in ("summary", "keywords"):
+            values: list[str] = []
+            seen_values: set[str] = set()
+            for source in (primary_highlight, secondary_highlight):
+                if not isinstance(source, dict):
+                    continue
+                raw_values = source.get(field)
+                if not isinstance(raw_values, list):
+                    continue
+                for value in raw_values:
+                    text = str(value)
+                    if text in seen_values:
+                        continue
+                    seen_values.add(text)
+                    values.append(text)
+            if values:
+                highlight[field] = values
+        if highlight:
+            merged["highlight"] = highlight
+
+    return merged
