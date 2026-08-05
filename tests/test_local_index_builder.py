@@ -49,3 +49,13 @@ async def test_local_index_builder_outputs_searchable_artifacts(tmp_path) -> Non
     assert all(
         hit.vector_score is not None and math.isfinite(hit.vector_score) for hit in vector_hits
     )
+
+    mismatched_retriever = LocalFaissRetriever(
+        artifact_store,
+        MockEmbeddingService(dim=8),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=r"index dimension is 16, query embedding dimension is 8",
+    ):
+        await mismatched_retriever.search("shanghai trip meeting", top_k=2)
