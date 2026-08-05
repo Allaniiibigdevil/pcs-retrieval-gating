@@ -16,7 +16,7 @@
 
 ## 查询与召回
 
-`rewrite_queries()` 当前是占位实现，默认返回原始 task。后续可以返回多个改写 query。所有 ES 和 FAISS 查询会并行执行；单个 query 失败不会中断其他查询，只有两个通道全部失败时才返回错误。
+`rewrite_queries()` 当前是占位实现，默认返回原始 task。后续可以返回多个改写 query。`prepare_queries()` 会固定把原始 task 放在第 0 条，再追加去重后的 rewrite。所有 ES 和 FAISS 查询会并行执行；单个 query 失败不会中断其他查询，只有两个通道全部失败时才返回错误。
 
 ES 查询参数与 `rrf` / `reranker` 分支保持一致：
 
@@ -34,16 +34,22 @@ ES 和 FAISS 的 top-k 分开配置：
 ES_TOP_K_DOCS=50
 FAISS_TOP_K_DOCS=50
 EVIDENCE_DOCS_PER_SYSTEM=3
+REWRITTEN_QUERY_ES_WEIGHT=1.0
 ```
+
+`REWRITTEN_QUERY_ES_WEIGHT` 只作用于第 1 条及之后的 rewrite query。原始 task 的 ES 权重固定为 `1.0`。当前默认值也是 `1.0`，因此原始 query 和 rewrite query 暂时等权；后续改成 `0.8` 等值时，才会降低 rewrite 的 ES 贡献。
 
 当前 score-fusion 分支**不对 FAISS 结果设置最低分或自适应阈值**。原因是最终决策直接使用向量分，并且 agreement 另有最低语义门槛；过早删除中等向量分会让原本的双路证据退化成 ES-only。
 
 ## 多 query 聚合
 
-不同 rewrite 的 ES `_score` 不直接横向比较。每个 query 内先归一化：
+不同 rewrite 的 ES `_score` 不直接横向比较。每个 query 内先归一化，再乘对应 query 的 ES 权重：
 
 ```text
-bm25_score_norm_q(d) = bm25_score_q(d) / max_x bm25_score_q(x)
+raw_bm25_score_norm_q(d) = bm25_score_q(d) / max_x bm25_score_q(x)
+query_es_weight_q = 1.0                                if q is original task
+query_es_weight_q = REWRITTEN_QUERY_ES_WEIGHT          otherwise
+bm25_score_norm_q(d) = query_es_weight_q * raw_bm25_score_norm_q(d)
 ```
 
 同一文档跨 rewrite 聚合：
@@ -53,7 +59,7 @@ lexical(d) = max_q bm25_score_norm_q(d)
 semantic(d) = max_q clamp(vector_score_q(d), 0, 1)
 ```
 
-原始 ES `_score` 保留在 `bm25_score`，归一化结果保存在 `bm25_score_norm`。响应中的 `matched_queries` 会列出命中过该文档的 rewrite query。
+原始 ES `_score` 保留在 `bm25_score`，加权后的归一化结果保存在 `bm25_score_norm`。响应中的 `matched_queries` 会列出命中过该文档的 query。
 
 ## 评分公式
 
@@ -67,7 +73,6 @@ agreement_score = AGREEMENT_WEIGHT * sqrt(semantic * lexical)
   if semantic >= SEMANTIC_MATCH_THRESHOLD
   and lexical >= LEXICAL_MATCH_THRESHOLD
   else 0
-
 doc_strength = clamp(base_score + agreement_score, 0, 1)
 system_confidence = max(doc_strength of docs in the system)
 selected = system_confidence >= SYSTEM_SELECTION_THRESHOLD
@@ -76,6 +81,7 @@ selected = system_confidence >= SYSTEM_SELECTION_THRESHOLD
 默认配置：
 
 ```env
+REWRITTEN_QUERY_ES_WEIGHT=1.0
 SYSTEM_SELECTION_THRESHOLD=0.60
 ES_SCORE_WEIGHT=0.55
 AGREEMENT_WEIGHT=0.20
@@ -129,8 +135,8 @@ curl -X POST http://127.0.0.1:8000/v1/decide \
 - `selected_systems`：最终建议检索的系统；
 - `decisions`：所有候选系统的 confidence 和证据；
 - `evidence_docs[].bm25_score`：原始 ES `_score`；
-- `evidence_docs[].bm25_score_norm`：query 内归一化词法分；
-- `evidence_docs[].matched_queries`：命中过该文档的 rewrite query。
+- `evidence_docs[].bm25_score_norm`：query 内归一化并乘 query 权重后的词法分；
+- `evidence_docs[].matched_queries`：命中过该文档的 query。
 
 ## 检查
 
