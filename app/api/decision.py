@@ -16,8 +16,6 @@ async def decide(request: DecideRequest) -> DecideResponse:
         return await decision_engine.decide(
             task=request.task,
             task_id=request.task_id,
-            top_k_docs=request.top_k_docs,
-            max_systems=request.max_systems,
         )
     except Exception as exc:
         logger.exception("decision_failed", extra={"task_id": request.task_id})
