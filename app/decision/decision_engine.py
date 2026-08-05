@@ -1,12 +1,17 @@
 import logging
 
+from app.config import get_settings
 from app.decision.evidence_builder import EvidenceBuilder
 from app.decision.query_normalizer import QueryNormalizer
+from app.decision.query_rewriter import prepare_queries, rewrite_queries
 from app.decision.system_aggregator import SystemAggregator
 from app.retrieval.candidate_merger import CandidateMerger
 from app.retrieval.factory import Retriever, get_keyword_retriever, get_vector_retriever
+from app.retrieval.parallel_query_retriever import (
+    ChannelSearchResult,
+    search_queries_in_parallel,
+)
 from app.schemas.decision import DecideResponse
-from app.schemas.search import SearchHit
 from app.utils.timing import StageTimer
 
 logger = logging.getLogger(__name__)
@@ -33,60 +38,80 @@ class DecisionEngine:
         self,
         task: str,
         task_id: str | None = None,
-        top_k_docs: int = 50,
-        max_systems: int = 5,
     ) -> DecideResponse:
+        settings = get_settings()
+        es_top_k = settings.ES_TOP_K_DOCS
+        faiss_top_k = settings.FAISS_TOP_K_DOCS
+        logger.info(
+            "decision_started task_id=%s es_top_k=%d faiss_top_k=%d",
+            task_id,
+            es_top_k,
+            faiss_top_k,
+        )
         timer = StageTimer()
-        bm25_query = self.normalizer.normalize(task)
-        vector_query = task
-        timer.mark("normalize")
+        queries = prepare_queries(task, await rewrite_queries(task))
+        keyword_queries = [self.normalizer.normalize(query) for query in queries]
+        timer.mark("query_rewrite")
 
-        bm25_hits: list[SearchHit] = []
-        vector_hits: list[SearchHit] = []
-        keyword_error: Exception | None = None
-        vector_error: Exception | None = None
+        search_result = await search_queries_in_parallel(
+            keyword_retriever=self.keyword_retriever,
+            vector_retriever=self.vector_retriever,
+            keyword_queries=keyword_queries,
+            vector_queries=queries,
+            keyword_top_k=es_top_k,
+            vector_top_k=faiss_top_k,
+        )
+        timer.mark("parallel_search")
+        _log_failures("keyword", task_id, search_result.keyword)
+        _log_failures("vector", task_id, search_result.vector)
 
-        try:
-            bm25_hits = await self.keyword_retriever.search(bm25_query, top_k_docs)
-        except Exception as exc:
-            keyword_error = exc
-            logger.exception("keyword_search_failed", extra={"task_id": task_id})
-        timer.mark("keyword_search")
+        if search_result.keyword.all_failed and search_result.vector.all_failed:
+            logger.error("decision_failed task_id=%s", task_id)
+            cause = search_result.vector.failures[-1].error
+            raise RuntimeError("Both ES and vector search failed") from cause
 
-        try:
-            vector_hits = await self.vector_retriever.search(vector_query, top_k_docs)
-        except Exception as exc:
-            vector_error = exc
-            logger.exception("vector_search_failed", extra={"task_id": task_id})
-        timer.mark("vector_search")
-
-        if keyword_error is not None and vector_error is not None:
-            logger.error("decision_failed", extra={"task_id": task_id})
-            raise RuntimeError("Both ES and vector search failed") from vector_error
-
-        candidates = self.merger.merge(bm25_hits, vector_hits)
+        keyword_hits = search_result.keyword.hits
+        vector_hits = search_result.vector.hits
+        candidates = self.merger.merge(keyword_hits, vector_hits)
         timer.mark("merge")
         evidence_docs = self.evidence_builder.build(task, candidates)
-        decisions = self.aggregator.aggregate(evidence_docs, max_systems)
+        decisions = self.aggregator.aggregate(evidence_docs)
         selected_systems = [item.system_id for item in decisions if item.selected]
         timer.mark("aggregate")
         latency_ms = timer.finish()
 
         logger.info(
-            "decision_completed",
-            extra={
-                "task_id": task_id,
-                "bm25_hit_count": len(bm25_hits),
-                "vector_hit_count": len(vector_hits),
-                "merged_candidate_count": len(candidates),
-                "selected_systems": selected_systems,
-                "latency_ms": latency_ms,
-            },
+            "decision_completed task_id=%s query_count=%d keyword_hits=%d vector_hits=%d "
+            "merged_candidates=%d selected_systems=%s latency_ms=%s",
+            task_id,
+            len(queries),
+            len(keyword_hits),
+            len(vector_hits),
+            len(candidates),
+            selected_systems,
+            latency_ms,
         )
         return DecideResponse(
             task_id=task_id,
             task=task,
+            rewritten_queries=queries,
             selected_systems=selected_systems,
             decisions=decisions,
             latency_ms=latency_ms,
+        )
+
+
+def _log_failures(
+    channel: str,
+    task_id: str | None,
+    result: ChannelSearchResult,
+) -> None:
+    for failure in result.failures:
+        error = failure.error
+        logger.error(
+            "%s_search_failed task_id=%s query_index=%d",
+            channel,
+            task_id,
+            failure.query_index,
+            exc_info=(type(error), error, error.__traceback__),
         )
