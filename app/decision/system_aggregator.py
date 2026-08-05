@@ -18,17 +18,16 @@ def _vector_score_norm(hit: SearchHit) -> float:
     return 0.0
 
 
-def _es_score_norm(hit: SearchHit, max_es_score: float) -> float:
-    """Normalize ES scores within one query's candidate set."""
-    if hit.bm25_score is None or hit.bm25_score <= 0 or max_es_score <= 0:
+def _es_score_norm(hit: SearchHit) -> float:
+    if hit.bm25_score_norm is None:
         return 0.0
-    return _clamp(hit.bm25_score / max_es_score)
+    return _clamp(hit.bm25_score_norm)
 
 
-def simple_doc_strength(hit: SearchHit, max_es_score: float = 0.0) -> float:
+def simple_doc_strength(hit: SearchHit) -> float:
     settings = get_settings()
     semantic_score = _vector_score_norm(hit)
-    lexical_score = _es_score_norm(hit, max_es_score)
+    lexical_score = _es_score_norm(hit)
     agreement_boost = (
         settings.AGREEMENT_WEIGHT * math.sqrt(semantic_score * lexical_score)
         if semantic_score >= settings.SEMANTIC_MATCH_THRESHOLD
@@ -45,55 +44,55 @@ def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
     highlight = doc.metadata.get("highlight")
     if not isinstance(highlight, dict):
         return {}
-
-    normalized: dict[str, list[str]] = {}
-    for field in ("summary", "keywords"):
-        values = highlight.get(field)
-        if isinstance(values, list):
-            normalized[field] = [str(value) for value in values]
-    return normalized
+    return {
+        field: [str(value) for value in highlight[field]]
+        for field in ("summary", "keywords")
+        if isinstance(highlight.get(field), list)
+    }
 
 
-def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
-    highlight = doc.metadata.get("highlight")
-    if not isinstance(highlight, dict):
-        return {}
-
-    normalized: dict[str, list[str]] = {}
-    for field in ("summary", "keywords"):
-        values = highlight.get(field)
-        if isinstance(values, list):
-            normalized[field] = [str(value) for value in values]
-    return normalized
+def _matched_queries_from_metadata(doc: SearchHit) -> list[str]:
+    matched_queries = doc.metadata.get("matched_queries")
+    if not isinstance(matched_queries, list):
+        return []
+    return [str(value) for value in matched_queries]
 
 
 class SystemAggregator:
-    def __init__(self, selection_threshold: float | None = None) -> None:
+    def __init__(
+        self,
+        selection_threshold: float | None = None,
+        evidence_docs_per_system: int | None = None,
+    ) -> None:
         settings = get_settings()
         self.selection_threshold = (
             settings.SYSTEM_SELECTION_THRESHOLD
             if selection_threshold is None
             else selection_threshold
         )
+        self.evidence_docs_per_system = (
+            settings.EVIDENCE_DOCS_PER_SYSTEM
+            if evidence_docs_per_system is None
+            else evidence_docs_per_system
+        )
+        if not 0.0 <= self.selection_threshold <= 1.0:
+            raise ValueError("selection_threshold must be between 0 and 1")
+        if self.evidence_docs_per_system <= 0:
+            raise ValueError("evidence_docs_per_system must be greater than 0")
 
-    def aggregate(self, evidence_docs: list[SearchHit], max_systems: int = 5) -> list[SystemDecision]:
+    def aggregate(self, evidence_docs: list[SearchHit]) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
         for doc in evidence_docs:
             grouped[doc.system_id].append(doc)
 
-        max_es_score = max(
-            (doc.bm25_score or 0.0 for doc in evidence_docs),
-            default=0.0,
-        )
         decisions: list[SystemDecision] = []
         for system_id, docs in grouped.items():
             sorted_docs = sorted(
                 docs,
-                key=lambda doc: simple_doc_strength(doc, max_es_score),
-                reverse=True,
+                key=lambda doc: (-simple_doc_strength(doc), doc.doc_id),
             )
-            top_docs = sorted_docs[:3]
-            confidence = simple_doc_strength(top_docs[0], max_es_score) if top_docs else 0.0
+            top_docs = sorted_docs[: self.evidence_docs_per_system]
+            confidence = simple_doc_strength(top_docs[0]) if top_docs else 0.0
             selected = confidence >= self.selection_threshold
 
             decisions.append(
@@ -107,8 +106,10 @@ class SystemAggregator:
                             summary=doc.summary,
                             keywords=list(doc.keywords),
                             matched_keywords=list(doc.metadata.get("matched_keywords", [])),
+                            matched_queries=_matched_queries_from_metadata(doc),
                             highlight=_highlight_from_metadata(doc),
                             bm25_score=doc.bm25_score,
+                            bm25_score_norm=doc.bm25_score_norm,
                             vector_score=doc.vector_score,
                             bm25_rank=doc.bm25_rank,
                             vector_rank=doc.vector_rank,
@@ -118,4 +119,7 @@ class SystemAggregator:
                 )
             )
 
-        return sorted(decisions, key=lambda item: item.confidence, reverse=True)[:max_systems]
+        return sorted(
+            decisions,
+            key=lambda item: (-item.confidence, item.system_id),
+        )
