@@ -23,7 +23,7 @@ class BuildIndexResult:
     artifact_dir: str
     embedding_model: str
     embedding_dim: int
-    source_count: int = 0
+    source_count: int
     elasticsearch_indices: dict[str, str] = field(default_factory=dict)
 
 
@@ -32,17 +32,13 @@ class LocalIndexBuilder:
         self,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
-        index_elasticsearch: bool | None = None,
+        index_elasticsearch: bool = False,
         source_registry: SourceRegistry | None = None,
     ) -> None:
         self.settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service or get_embedding_service()
-        self.index_elasticsearch = (
-            self.settings.LOCAL_ES_INDEX_ON_BUILD
-            if index_elasticsearch is None
-            else index_elasticsearch
-        )
+        self.index_elasticsearch = index_elasticsearch
         self.source_registry = source_registry or get_source_registry()
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
@@ -57,13 +53,17 @@ class LocalIndexBuilder:
         embedding_texts = [build_embedding_text(doc) for doc in docs]
         embeddings = await self.embedding_service.embed_batch(embedding_texts)
         embedding_matrix = np.asarray(embeddings, dtype="float32")
-        if len(embedding_matrix.shape) != 2:
+        if embedding_matrix.ndim != 2:
             raise ValueError("Embedding service must return a 2D matrix")
+        if embedding_matrix.shape[0] != len(docs):
+            raise ValueError("Embedding service returned a different number of vectors than docs")
+        if embedding_matrix.shape[1] <= 0:
+            raise ValueError("Embedding vectors must have a positive dimension")
 
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
-        index = faiss.IndexFlatIP(embedding_matrix.shape[1])
+        index = faiss.IndexFlatIP(int(embedding_matrix.shape[1]))
         index.add(embedding_matrix)
 
         self.artifact_store.save_docs(docs)
@@ -76,10 +76,9 @@ class LocalIndexBuilder:
         elasticsearch_indices: dict[str, str] = {}
         if self.index_elasticsearch:
             for source in self.source_registry.sources:
-                source_docs = docs_by_source.get(source.source_id, [])
-                if not source_docs:
-                    continue
-                LocalElasticsearchIndexer(index_name=source.es_index).rebuild(source_docs)
+                LocalElasticsearchIndexer(index_name=source.es_index).rebuild(
+                    docs_by_source.get(source.source_id, [])
+                )
                 elasticsearch_indices[source.source_id] = source.es_index
 
         self.artifact_store.save_manifest(
@@ -87,19 +86,23 @@ class LocalIndexBuilder:
                 "version": 2,
                 "built_at": datetime.now(UTC).isoformat(),
                 "doc_count": len(docs),
-                "source_count": len(docs_by_source),
+                "source_count": len(self.source_registry.sources),
                 "sources": {
-                    source_id: {
-                        "doc_count": len(source_docs),
-                        "elasticsearch_index": self.source_registry.require(source_id).es_index,
+                    source.source_id: {
+                        "doc_count": len(docs_by_source.get(source.source_id, [])),
+                        "elasticsearch_index": source.es_index,
                     }
-                    for source_id, source_docs in sorted(docs_by_source.items())
+                    for source in self.source_registry.sources
                 },
                 "keyword_retriever": "local_es_per_source",
                 "elasticsearch_indexed": self.index_elasticsearch,
                 "elasticsearch_url": self.settings.LOCAL_ES_URL,
                 "elasticsearch_indices": elasticsearch_indices,
-                "source_config_path": self.settings.LOCAL_SOURCE_CONFIG_PATH,
+                "source_config_path": (
+                    str(self.source_registry.config_path)
+                    if self.source_registry.config_path is not None
+                    else None
+                ),
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": int(embedding_matrix.shape[1]),
@@ -113,6 +116,6 @@ class LocalIndexBuilder:
             artifact_dir=str(self.artifact_store.artifact_dir),
             embedding_model=self.settings.EMBEDDING_MODEL_PATH,
             embedding_dim=int(embedding_matrix.shape[1]),
-            source_count=len(docs_by_source),
+            source_count=len(self.source_registry.sources),
             elasticsearch_indices=elasticsearch_indices,
         )
