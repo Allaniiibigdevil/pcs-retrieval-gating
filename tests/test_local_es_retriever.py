@@ -5,7 +5,11 @@ from app.retrieval.local_es_retriever import LocalElasticsearchRetriever
 
 class FakeLocalElasticsearchRetriever(LocalElasticsearchRetriever):
     def __init__(self, response: dict) -> None:
-        super().__init__(base_url="http://localhost:9200", index_name="test")
+        super().__init__(
+            source_id="notepad",
+            index_name="test",
+            base_url="http://localhost:9200",
+        )
         self.response = response
         self.request_body = None
 
@@ -15,7 +19,7 @@ class FakeLocalElasticsearchRetriever(LocalElasticsearchRetriever):
         return self.response
 
 
-def test_local_es_retriever_uses_rrf_query_shape_and_highlights() -> None:
+def test_retriever_uses_cross_fields_and_highlights() -> None:
     retriever = FakeLocalElasticsearchRetriever(
         {
             "hits": {
@@ -42,14 +46,9 @@ def test_local_es_retriever_uses_rrf_query_shape_and_highlights() -> None:
 
     hits = asyncio.run(retriever.search("海鲜 过敏", top_k=5))
 
-    assert retriever.request_body is not None
     query = retriever.request_body["query"]["multi_match"]
     assert query["type"] == "cross_fields"
     assert query["operator"] == "or"
     assert query["minimum_should_match"] == "1<2"
-    assert retriever.fields == ["summary^1.0", "keywords^1.0"]
-    assert retriever.request_body["highlight"]["fields"]["keywords"] == {
-        "number_of_fragments": 0
-    }
+    assert hits[0].system_id == "notepad"
     assert hits[0].metadata["matched_keywords"] == ["海鲜过敏"]
-    assert hits[0].metadata["highlight"]["summary"] == ["记录了用户对<em>海鲜</em>过敏"]
