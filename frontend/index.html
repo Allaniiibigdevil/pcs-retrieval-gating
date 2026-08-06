@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Retrieval Gating · Score Fusion</title>
-    <link rel="stylesheet" href="./styles.css?v=multi-source-v2" />
+    <link rel="stylesheet" href="./styles.css?v=multi-source-v3" />
   </head>
   <body>
     <div class="app-shell">
@@ -41,12 +41,11 @@
           <div class="config-grid">
             <section class="panel"><h2>连接</h2><label for="apiBaseInput">API Base</label><input id="apiBaseInput" type="url" /><p class="muted">这是前端唯一会保存并实际使用的设置。</p></section>
             <section class="panel"><h2>服务级 `.env`</h2><pre>LOCAL_SOURCE_CONFIG_PATH=config/sources.json
-LOCAL_FAISS_INDEX_PATH=data/artifacts/faiss.index
-LOCAL_FAISS_DOC_IDS_PATH=data/artifacts/faiss_doc_ids.json
+LOCAL_ARTIFACT_DIR=data/artifacts
 LOCAL_ES_URL=http://127.0.0.1:9200
 EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
 REWRITTEN_QUERY_ES_WEIGHT=1.0</pre></section>
-            <section class="panel"><h2>数据源级 `config/sources.json`</h2><p>每个 source 独立配置 `es_index`、ES/FAISS top-k、融合权重和选择阈值。浏览器不会修改该文件。</p></section>
+            <section class="panel"><h2>数据源级 `config/sources.json`</h2><p>每个 source 独立配置 `es_index`、`faiss_index_path`、`faiss_doc_ids_path`、ES/FAISS top-k、融合权重和选择阈值。浏览器不会修改该文件。</p></section>
             <section class="panel"><h2>评分</h2><pre>base = max(vector_score, es_score_weight × bm25_score_norm)
 agreement = agreement_weight × √(vector_score × bm25_score_norm)
 confidence = clamp(base + agreement)
@@ -55,6 +54,6 @@ selected = confidence ≥ source.selection_threshold</pre></section>
         </section>
       </main>
     </div>
-    <script src="./app.js?v=multi-source-v2"></script>
+    <script src="./app.js?v=multi-source-v3"></script>
   </body>
 </html>
