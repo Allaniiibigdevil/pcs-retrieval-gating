@@ -2,7 +2,14 @@ from app.schemas.search import SearchHit
 
 
 class CandidateMerger:
-    def merge(self, bm25_hits: list[SearchHit], vector_hits: list[SearchHit]) -> list[SearchHit]:
+    def merge(
+        self,
+        source_id: str,
+        bm25_hits: list[SearchHit],
+        vector_hits: list[SearchHit],
+    ) -> list[SearchHit]:
+        _validate_source(source_id, bm25_hits)
+        _validate_source(source_id, vector_hits)
         merged: dict[str, SearchHit] = {}
 
         for hit in bm25_hits:
@@ -23,6 +30,15 @@ class CandidateMerger:
             existing.metadata = _merge_metadata(existing.metadata, hit.metadata)
 
         return list(merged.values())
+
+
+def _validate_source(source_id: str, hits: list[SearchHit]) -> None:
+    mismatched = [hit.doc_id for hit in hits if hit.system_id != source_id]
+    if mismatched:
+        raise ValueError(
+            f"Candidate hits for source {source_id!r} contain mismatched documents: "
+            + ", ".join(mismatched[:5])
+        )
 
 
 def _merge_metadata(primary: dict, secondary: dict) -> dict:
