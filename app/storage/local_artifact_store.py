@@ -18,19 +18,10 @@ class LocalArtifactStore:
         self.artifact_dir = Path(artifact_dir or settings.LOCAL_ARTIFACT_DIR)
         self.docs_path = self.artifact_dir / "docs.jsonl"
         self.manifest_path = self.artifact_dir / "manifest.json"
-
-        if artifact_dir is not None:
-            self.faiss_path = Path(faiss_index_path or self.artifact_dir / "faiss.index")
-            self.faiss_doc_ids_path = Path(
-                faiss_doc_ids_path or self.artifact_dir / "faiss_doc_ids.json"
-            )
-        else:
-            self.faiss_path = Path(
-                faiss_index_path or settings.LOCAL_FAISS_INDEX_PATH
-            )
-            self.faiss_doc_ids_path = Path(
-                faiss_doc_ids_path or settings.LOCAL_FAISS_DOC_IDS_PATH
-            )
+        self.faiss_path = Path(faiss_index_path or settings.LOCAL_FAISS_INDEX_PATH)
+        self.faiss_doc_ids_path = Path(
+            faiss_doc_ids_path or settings.LOCAL_FAISS_DOC_IDS_PATH
+        )
 
     def ensure_dir(self) -> None:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -82,8 +73,14 @@ class LocalArtifactStore:
         import faiss
 
         index = faiss.read_index(str(self.faiss_path))
-        doc_ids = json.loads(self.faiss_doc_ids_path.read_text(encoding="utf-8"))
-        return index, doc_ids
+        raw_doc_ids = json.loads(self.faiss_doc_ids_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_doc_ids, list) or not all(
+            isinstance(doc_id, str) and doc_id for doc_id in raw_doc_ids
+        ):
+            raise ValueError(
+                f"Invalid FAISS doc-id mapping: {self.faiss_doc_ids_path} must contain strings"
+            )
+        return index, raw_doc_ids
 
     def save_manifest(self, manifest: dict[str, Any]) -> None:
         self.ensure_dir()
