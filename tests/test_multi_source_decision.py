@@ -39,6 +39,8 @@ def _source(source_id: str, *, reranker_threshold: float) -> SourceConfig:
     return SourceConfig(
         source_id=source_id,
         es_index=f"pcs-{source_id}",
+        faiss_index_path=f"data/artifacts/{source_id}/faiss.index",
+        faiss_doc_ids_path=f"data/artifacts/{source_id}/faiss_doc_ids.json",
         es_top_k=5,
         faiss_top_k=5,
         evidence_docs_per_system=2,
