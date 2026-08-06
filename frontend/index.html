@@ -3,244 +3,61 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Retrieval Gating · Reranker Console</title>
-    <link rel="stylesheet" href="./styles.css?v=reranker-v4" />
+    <title>Retrieval Gating · Reranker</title>
+    <link rel="stylesheet" href="./styles.css?v=multi-source-v2" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">RG</div>
-          <div>
-            <div class="brand-title">Retrieval Gating</div>
-            <div class="brand-subtitle">Local Prototype</div>
-          </div>
-        </div>
-
+        <div class="brand"><div class="brand-mark">RG</div><div><strong>Retrieval Gating</strong><span>Reranker</span></div></div>
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" data-view="chat" type="button">对话决策</button>
+          <button class="nav-item active" data-view="chat" type="button">决策</button>
           <button class="nav-item" data-view="docs" type="button">Docs</button>
-          <button class="nav-item" data-view="settings" type="button">配置说明</button>
+          <button class="nav-item" data-view="settings" type="button">配置</button>
         </nav>
-
-        <div class="status-panel">
-          <div class="status-row">
-            <span>后端状态</span>
-            <strong id="apiStatus">未检查</strong>
-          </div>
-          <button class="secondary-button compact" id="healthButton" type="button">检查连接</button>
-        </div>
+        <div class="status-panel"><span>后端：<strong id="apiStatus">未检查</strong></span><button id="healthButton" type="button">检查</button></div>
       </aside>
 
       <main class="workspace">
         <section class="view active" id="view-chat">
-          <header class="page-header">
-            <div>
-              <p class="eyebrow">Decision Debugger</p>
-              <h1>从用户问题判断应该检索哪些子系统</h1>
-            </div>
-            <div class="selected-summary" id="selectedSummary">暂无结果</div>
-          </header>
-
+          <header class="page-header"><div><p>Decision Debugger</p><h1>多数据源 Reranker 门控</h1></div><div id="selectedSummary" class="selected-summary">暂无结果</div></header>
           <div class="decision-layout">
-            <section class="query-panel">
-              <div class="section-title">
-                <span class="step">输入</span>
-                <h2>用户问题</h2>
-              </div>
-              <form class="composer" id="decideForm">
-                <textarea
-                  id="taskInput"
-                  rows="5"
-                  placeholder="例如：我可以吃海鲜吗？（Enter 发送，Ctrl+Enter 换行）"
-                ></textarea>
-                <div class="composer-actions">
-                  <span class="composer-hint">Enter 发送 · Ctrl+Enter 换行</span>
-                  <button class="primary-button" type="submit">生成候选系统</button>
-                </div>
-              </form>
-              <div class="message-list" id="messageList" aria-live="polite"></div>
+            <section class="panel">
+              <h2>用户任务</h2>
+              <form id="decideForm" class="composer"><textarea id="taskInput" rows="5" placeholder="例如：我可以吃海鲜吗？"></textarea><button type="submit">生成候选系统</button></form>
+              <div id="messageList" class="history"></div>
             </section>
-
-            <section class="systems-panel">
-              <div class="section-title horizontal">
-                <div>
-                  <span class="step">输出</span>
-                  <h2>候选系统</h2>
-                </div>
-                <span class="meta" id="latencyText">-</span>
-              </div>
-              <div class="system-list" id="systemList"></div>
-            </section>
+            <section class="panel"><div class="section-row"><h2>候选系统</h2><span id="latencyText">-</span></div><div id="systemList" class="system-list"></div></section>
           </div>
         </section>
 
         <section class="view" id="view-docs">
-          <header class="page-header">
-            <div>
-              <p class="eyebrow">Source Documents</p>
-              <h1>查看 JSONL 格式的文档摘要</h1>
-            </div>
-            <button class="secondary-button" id="loadExampleButton" type="button">加载示例 docs</button>
-          </header>
-
-          <section class="docs-panel">
-            <div class="docs-toolbar">
-              <label class="file-picker">
-                <span>选择 JSONL</span>
-                <input id="docsFileInput" type="file" accept=".jsonl,application/jsonlines,text/plain" />
-              </label>
-              <input id="docsFilterInput" type="search" placeholder="按 doc_id、system_id、summary、keywords 过滤" />
-            </div>
-            <details class="jsonl-example" id="jsonlExample" open>
-              <summary>JSONL 示例</summary>
-              <pre>{"doc_id":"1","system_id":"album","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
-{"doc_id":"2","system_id":"album","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{}}
-{"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{}}
-{"doc_id":"4","system_id":"notepad","summary":"记录了用户的身份证号码、银行卡号","keywords":["身份证","银行卡"],"metadata":{}}</pre>
-            </details>
-            <div class="docs-grid" id="docsGrid"></div>
-          </section>
+          <header class="page-header"><div><p>Source Documents</p><h1>查看建索引输入</h1></div><button id="loadExampleButton" type="button">加载示例</button></header>
+          <section class="panel"><div class="toolbar"><label>选择 JSONL <input id="docsFileInput" type="file" accept=".jsonl,text/plain" /></label><input id="docsFilterInput" type="search" placeholder="过滤文档" /></div><div id="docsGrid" class="docs-grid"></div></section>
         </section>
 
         <section class="view" id="view-settings">
-          <header class="page-header">
-            <div>
-              <p class="eyebrow">Scoring Reference</p>
-              <h1>评分配置说明</h1>
-            </div>
-            <button class="secondary-button" id="copyEnvButton" type="button">复制 .env 片段</button>
-          </header>
-
-          <div class="callout">
-            <strong>重要：这个页面不会直接修改后端，也不会让配置立即生效。</strong>
-            <p>
-              这里生成的是配置草案。需要手动复制 `.env` 片段到项目根目录的 `.env` 文件中，然后重启后端服务。
-              已加载的模型、索引和决策引擎实例不会因为浏览器页面变化而自动刷新。
-            </p>
-          </div>
-
-          <div class="settings-layout">
-            <section class="settings-card">
-              <div class="section-title">
-                <span class="step">后端</span>
-                <h2>召回规模</h2>
-              </div>
-              <div class="field-row">
-                <label for="apiBaseInput">API Base</label>
-                <input id="apiBaseInput" type="text" />
-                <p>默认值：当前页面 origin。通过 FastAPI 静态页面访问时通常不用改。</p>
-              </div>
-              <div class="field-row">
-                <label for="esTopKInput">ES_TOP_K_DOCS</label>
-                <input id="esTopKInput" type="number" min="1" max="1000" step="1" />
-                <p>默认值：50。ES 每次词法检索的全局 Top-K 窗口。</p>
-              </div>
-              <div class="field-row">
-                <label for="faissTopKInput">FAISS_TOP_K_DOCS</label>
-                <input id="faissTopKInput" type="number" min="1" max="1000" step="1" />
-                <p>默认值：50。FAISS 只执行一次该深度的向量检索。</p>
-              </div>
-              <div class="field-row">
-                <label for="faissPreferredThresholdInput">FAISS_PREFERRED_SCORE_THRESHOLD</label>
-                <input id="faissPreferredThresholdInput" type="number" min="-1" max="1" step="0.01" />
-                <p>默认值：0.60。优先保留达到该相似度的向量候选。</p>
-              </div>
-              <div class="field-row">
-                <label for="faissMinThresholdInput">FAISS_MIN_SCORE_THRESHOLD</label>
-                <input id="faissMinThresholdInput" type="number" min="-1" max="1" step="0.01" />
-                <p>默认值：0.30。自适应降低阈值时不可越过的安全下限。</p>
-              </div>
-              <div class="field-row">
-                <label for="faissTargetHitsInput">FAISS_TARGET_HITS</label>
-                <input id="faissTargetHitsInput" type="number" min="1" max="1000" step="1" />
-                <p>默认值：10。优选阈值下数量不足时，逻辑降低阈值以补足向量候选；不会再次请求 FAISS。</p>
-              </div>
-              <div class="field-row">
-                <label for="evidenceDocsPerSystemInput">EVIDENCE_DOCS_PER_SYSTEM</label>
-                <input id="evidenceDocsPerSystemInput" type="number" min="1" max="100" step="1" />
-                <p>默认值：3。每个候选 system 最多返回并展示的证据文档数。</p>
-              </div>
-            </section>
-
-            <section class="settings-card">
-              <div class="section-title">
-                <span class="step">精排</span>
-                <h2>GTE Reranker</h2>
-              </div>
-              <div class="field-row">
-                <label for="rerankerModelPathInput">RERANKER_MODEL_PATH</label>
-                <input id="rerankerModelPathInput" type="text" />
-                <p>默认使用项目目录下的 `Alibaba-NLP/gte-multilingual-reranker-base`。</p>
-              </div>
-              <div class="field-row">
-                <label for="rerankerScoreThresholdInput">RERANKER_SCORE_THRESHOLD</label>
-                <input id="rerankerScoreThresholdInput" type="number" min="0" max="1" step="0.01" />
-                <p>默认值：0.50。一个 system 只要有一篇文档达到该值就被选中。</p>
-              </div>
-              <div class="field-row">
-                <label for="rerankerBatchSizeInput">RERANKER_BATCH_SIZE</label>
-                <input id="rerankerBatchSizeInput" type="number" min="1" max="256" step="1" />
-                <p>默认值：8。显存或内存充足时可增大以提高批处理吞吐。</p>
-              </div>
-              <div class="field-row">
-                <label for="rerankerMaxLengthInput">RERANKER_MAX_LENGTH</label>
-                <input id="rerankerMaxLengthInput" type="number" min="8" max="8192" step="8" />
-                <p>默认值：512。摘要更长时可提高，但会增加精排时延和内存占用。</p>
-              </div>
-            </section>
-
-            <section class="formula-card">
-              <div class="section-title">
-                <span class="step">公式</span>
-                <h2>Reranker 最终评分与系统选择</h2>
-              </div>
-              <div class="formula-flow">
-                <div>
-                  <strong>1. 全局候选</strong>
-                  <code>E = dedupe(∪ ES(query, ES_TOP_K_DOCS))</code>
-                  <code>V_raw = dedupe(∪ FAISS(query, FAISS_TOP_K_DOCS)) where vector_score &gt;= FAISS_MIN_SCORE_THRESHOLD</code>
-                  <code>ES 使用 cross_fields；1 个分词须命中 1 个，2 个及以上分词须至少命中 2 个</code>
-                </div>
-                <div>
-                  <strong>2. 向量候选自适应</strong>
-                  <code>T_eff = T_preferred；不足 N 条时降到第 N 名分数，但不低于 T_min</code>
-                  <code>V = {doc in V_raw | vector_score &gt;= T_eff}</code>
-                  <code>每条改写 query 只执行一次 FAISS search</code>
-                </div>
-                <div>
-                  <strong>3. Cross-Encoder 精排</strong>
-                  <code>C = dedupe(E ∪ V)</code>
-                  <code>zᵢ = GTE(query, keywordsᵢ + summaryᵢ)</code>
-                  <code>sᵢ = sigmoid(zᵢ) = 1 / (1 + exp(-zᵢ))</code>
-                  <code>reranker_rank(dᵢ) = rank_desc(sᵢ)</code>
-                </div>
-                <div>
-                  <strong>4. 系统选择</strong>
-                  <code>Score(S) = max { sᵢ | dᵢ ∈ C and system(dᵢ) = S }</code>
-                  <code>Selected(S) = 1[Score(S) &gt;= RERANKER_SCORE_THRESHOLD]</code>
-                </div>
-              </div>
-              <div class="formula-note">
-                <p><strong>核心含义：</strong>最终文档分数和排名只由 GTE reranker 产生。BM25 与 FAISS 只负责召回候选并作为调试信号，不进入最终加权。system 使用最佳文档的 reranker 分数，不做多文档求和，也不强制返回固定数量。</p>
-              </div>
-            </section>
-
-            <section class="env-card">
-              <div class="section-title horizontal">
-                <div>
-                  <span class="step">复制</span>
-                  <h2>.env 片段</h2>
-                </div>
-                <span class="meta">手动粘贴后重启后端</span>
-              </div>
-              <pre id="envPreview"></pre>
-            </section>
+          <header class="page-header"><div><p>Effective Configuration</p><h1>真实生效的配置入口</h1></div></header>
+          <div class="config-grid">
+            <section class="panel"><h2>连接</h2><label for="apiBaseInput">API Base</label><input id="apiBaseInput" type="url" /><p class="muted">这是前端唯一会保存并实际使用的设置。</p></section>
+            <section class="panel"><h2>服务级 `.env`</h2><pre>LOCAL_SOURCE_CONFIG_PATH=config/sources.json
+LOCAL_FAISS_INDEX_PATH=data/artifacts/faiss.index
+LOCAL_FAISS_DOC_IDS_PATH=data/artifacts/faiss_doc_ids.json
+LOCAL_ES_URL=http://127.0.0.1:9200
+EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
+RERANKER_MODEL_PATH=Alibaba-NLP/gte-multilingual-reranker-base
+RERANKER_BATCH_SIZE=8
+RERANKER_MAX_LENGTH=512</pre></section>
+            <section class="panel"><h2>数据源级 `config/sources.json`</h2><p>每个 source 独立配置 `es_index`、ES/FAISS top-k、自适应向量候选参数和 reranker 选择阈值。浏览器不会修改该文件。</p></section>
+            <section class="panel"><h2>决策</h2><pre>每个 source 独立粗召回
+→ 每源执行向量候选阈值选择
+→ 所有候选一次批量 rerank
+source_score = max(reranker_score)
+selected = source_score ≥ source.reranker_score_threshold</pre></section>
           </div>
         </section>
       </main>
     </div>
-
-    <script src="./app.js?v=reranker-v4"></script>
+    <script src="./app.js?v=multi-source-v2"></script>
   </body>
 </html>
