@@ -13,20 +13,13 @@ class Retriever(Protocol):
 
 
 @lru_cache
-def get_keyword_retriever() -> Retriever:
-    return LocalElasticsearchRetriever()
-
-
-@lru_cache
-def get_vector_retriever() -> Retriever:
-    return LocalFaissRetriever()
-
-
-@lru_cache
 def build_keyword_retriever(source: SourceConfig) -> Retriever:
-    return LocalElasticsearchRetriever(index_name=source.es_index)
+    return LocalElasticsearchRetriever(
+        source_id=source.source_id,
+        index_name=source.es_index,
+    )
 
 
 @lru_cache
 def build_vector_retriever(source: SourceConfig) -> Retriever:
-    return LocalFaissRetriever(source_id=source.source_id, min_score_threshold=None)
+    return LocalFaissRetriever(source_id=source.source_id)
