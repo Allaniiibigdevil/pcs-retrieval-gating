@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
+from app.utils.paths import resolve_project_path
 
 
 class SourceConfig(BaseModel):
@@ -31,7 +32,9 @@ class SourceRegistry:
             raise ValueError("Source registry must contain at least one source")
 
         self.sources = tuple(sources)
-        self.config_path = Path(config_path) if config_path is not None else None
+        self.config_path = (
+            resolve_project_path(config_path) if config_path is not None else None
+        )
         self.by_id = {source.source_id: source for source in sources}
         if len(self.by_id) != len(sources):
             raise ValueError("Source registry contains duplicate source ids")
@@ -41,7 +44,7 @@ class SourceRegistry:
             raise ValueError("Each source must use a distinct Elasticsearch index")
 
         faiss_paths = [
-            path
+            str(resolve_project_path(path))
             for source in sources
             for path in (source.faiss_index_path, source.faiss_doc_ids_path)
         ]
@@ -68,7 +71,7 @@ class SourceRegistry:
 
     @classmethod
     def from_path(cls, path: str | Path) -> "SourceRegistry":
-        config_path = Path(path)
+        config_path = resolve_project_path(path)
         if not config_path.exists():
             raise FileNotFoundError(f"Missing source configuration: {config_path}")
 
