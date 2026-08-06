@@ -3,7 +3,8 @@ import hashlib
 import math
 import random
 from functools import lru_cache
-from typing import Protocol
+from threading import Lock
+from typing import Any, Protocol
 
 from app.config import get_settings
 from app.schemas.doc import SourceDoc
@@ -19,7 +20,9 @@ class EmbeddingService(Protocol):
 
 class MockEmbeddingService:
     def __init__(self, dim: int | None = None) -> None:
-        self.dim = dim or get_settings().EMBEDDING_DIM
+        self.dim = get_settings().EMBEDDING_DIM if dim is None else dim
+        if self.dim <= 0:
+            raise ValueError("Embedding dimension must be greater than 0")
 
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
@@ -38,28 +41,38 @@ class MockEmbeddingService:
 class BGEEmbeddingService:
     def __init__(self, model_path: str | None = None) -> None:
         self.model_path = model_path or get_settings().EMBEDDING_MODEL_PATH
-        self._model = None
-
-    @property
-    def model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(self.model_path)
-        return self._model
+        self._model: Any = None
+        self._load_lock = Lock()
+        self._inference_lock = Lock()
 
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        embeddings = await asyncio.to_thread(
-            self.model.encode,
-            texts,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
+        if not texts:
+            return []
+        return await asyncio.to_thread(self._encode, texts)
+
+    def _encode(self, texts: list[str]) -> list[list[float]]:
+        model = self._ensure_model()
+        with self._inference_lock:
+            embeddings = model.encode(
+                texts,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            )
         return embeddings.astype("float32").tolist()
+
+    def _ensure_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is None:
+                from sentence_transformers import SentenceTransformer
+
+                self._model = SentenceTransformer(self.model_path)
+        return self._model
 
 
 def build_embedding_text(doc: SourceDoc) -> str:
