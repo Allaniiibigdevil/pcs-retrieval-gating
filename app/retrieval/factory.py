@@ -22,4 +22,8 @@ def build_keyword_retriever(source: SourceConfig) -> Retriever:
 
 @lru_cache
 def build_vector_retriever(source: SourceConfig) -> Retriever:
-    return LocalFaissRetriever(source_id=source.source_id)
+    return LocalFaissRetriever(
+        source_id=source.source_id,
+        faiss_index_path=source.faiss_index_path,
+        faiss_doc_ids_path=source.faiss_doc_ids_path,
+    )
