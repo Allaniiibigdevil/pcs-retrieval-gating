@@ -3,32 +3,24 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.config import get_settings
+from app.config import PROJECT_ROOT, get_settings
 from app.schemas.doc import SourceDoc
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path).expanduser()
+    return resolved if resolved.is_absolute() else PROJECT_ROOT / resolved
+
+
 class LocalArtifactStore:
-    def __init__(
-        self,
-        artifact_dir: str | Path | None = None,
-        faiss_index_path: str | Path | None = None,
-        faiss_doc_ids_path: str | Path | None = None,
-    ) -> None:
-        settings = get_settings()
-        self.artifact_dir = Path(artifact_dir or settings.LOCAL_ARTIFACT_DIR)
+    def __init__(self, artifact_dir: str | Path | None = None) -> None:
+        configured_dir = artifact_dir or get_settings().LOCAL_ARTIFACT_DIR
+        self.artifact_dir = _resolve_path(configured_dir)
         self.docs_path = self.artifact_dir / "docs.jsonl"
         self.manifest_path = self.artifact_dir / "manifest.json"
-        self.faiss_path = Path(faiss_index_path or settings.LOCAL_FAISS_INDEX_PATH)
-        self.faiss_doc_ids_path = Path(
-            faiss_doc_ids_path or settings.LOCAL_FAISS_DOC_IDS_PATH
-        )
 
     def ensure_dir(self) -> None:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    def ensure_faiss_dirs(self) -> None:
-        self.faiss_path.parent.mkdir(parents=True, exist_ok=True)
-        self.faiss_doc_ids_path.parent.mkdir(parents=True, exist_ok=True)
 
     def save_docs(self, docs: list[SourceDoc]) -> None:
         self.ensure_dir()
@@ -52,33 +44,70 @@ class LocalArtifactStore:
                     raise ValueError(f"Invalid docs artifact at {self.docs_path}:{line_no}") from exc
         return docs
 
-    def save_faiss(self, index: Any, doc_ids: list[str]) -> None:
-        self.ensure_faiss_dirs()
+    def save_faiss(
+        self,
+        index: Any,
+        doc_ids: list[str],
+        *,
+        index_path: str | Path,
+        doc_ids_path: str | Path,
+    ) -> None:
+        if int(index.ntotal) != len(doc_ids):
+            raise ValueError(
+                "FAISS index and doc-id mapping must have the same number of entries"
+            )
+        if len(set(doc_ids)) != len(doc_ids):
+            raise ValueError("FAISS doc-id mapping contains duplicate doc_id values")
+
+        resolved_index_path = _resolve_path(index_path)
+        resolved_doc_ids_path = _resolve_path(doc_ids_path)
+        resolved_index_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_doc_ids_path.parent.mkdir(parents=True, exist_ok=True)
+
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
-        faiss.write_index(index, str(self.faiss_path))
-        self.faiss_doc_ids_path.write_text(
+        faiss.write_index(index, str(resolved_index_path))
+        resolved_doc_ids_path.write_text(
             json.dumps(doc_ids, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
-    def load_faiss(self) -> tuple[Any, list[str]]:
-        if not self.faiss_path.exists():
-            raise FileNotFoundError(f"Missing FAISS artifact: {self.faiss_path}")
-        if not self.faiss_doc_ids_path.exists():
-            raise FileNotFoundError(f"Missing FAISS doc ids artifact: {self.faiss_doc_ids_path}")
+    def load_faiss(
+        self,
+        *,
+        index_path: str | Path,
+        doc_ids_path: str | Path,
+    ) -> tuple[Any, list[str]]:
+        resolved_index_path = _resolve_path(index_path)
+        resolved_doc_ids_path = _resolve_path(doc_ids_path)
+        if not resolved_index_path.exists():
+            raise FileNotFoundError(f"Missing FAISS artifact: {resolved_index_path}")
+        if not resolved_doc_ids_path.exists():
+            raise FileNotFoundError(
+                f"Missing FAISS doc ids artifact: {resolved_doc_ids_path}"
+            )
 
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
-        index = faiss.read_index(str(self.faiss_path))
-        raw_doc_ids = json.loads(self.faiss_doc_ids_path.read_text(encoding="utf-8"))
+        index = faiss.read_index(str(resolved_index_path))
+        raw_doc_ids = json.loads(resolved_doc_ids_path.read_text(encoding="utf-8"))
         if not isinstance(raw_doc_ids, list) or not all(
             isinstance(doc_id, str) and doc_id for doc_id in raw_doc_ids
         ):
             raise ValueError(
-                f"Invalid FAISS doc-id mapping: {self.faiss_doc_ids_path} must contain strings"
+                f"Invalid FAISS doc-id mapping: {resolved_doc_ids_path} must contain strings"
+            )
+        if len(set(raw_doc_ids)) != len(raw_doc_ids):
+            raise ValueError(
+                f"Invalid FAISS doc-id mapping: {resolved_doc_ids_path} contains duplicates"
+            )
+        if int(index.ntotal) != len(raw_doc_ids):
+            raise RuntimeError(
+                "FAISS index and doc-id mapping are inconsistent: "
+                f"index contains {int(index.ntotal)} vectors but mapping contains "
+                f"{len(raw_doc_ids)} ids"
             )
         return index, raw_doc_ids
 
