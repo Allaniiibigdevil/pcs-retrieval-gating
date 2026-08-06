@@ -1,23 +1,8 @@
 from collections import defaultdict
 
+from app.retrieval.metadata import highlight_fields, string_list
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
-
-
-def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
-    highlight = doc.metadata.get("highlight")
-    if not isinstance(highlight, dict):
-        return {}
-    return {
-        field: [str(value) for value in highlight[field]]
-        for field in ("summary", "keywords")
-        if isinstance(highlight.get(field), list)
-    }
-
-
-def _matched_queries_from_metadata(doc: SearchHit) -> list[str]:
-    values = doc.metadata.get("matched_queries")
-    return [str(value) for value in values] if isinstance(values, list) else []
 
 
 def _doc_sort_key(doc: SearchHit) -> tuple[int, float, str]:
@@ -76,9 +61,13 @@ class SystemAggregator:
                             doc_id=doc.doc_id,
                             summary=doc.summary,
                             keywords=list(doc.keywords),
-                            matched_keywords=list(doc.metadata.get("matched_keywords", [])),
-                            matched_queries=_matched_queries_from_metadata(doc),
-                            highlight=_highlight_from_metadata(doc),
+                            matched_keywords=string_list(
+                                doc.metadata, "matched_keywords"
+                            ),
+                            matched_queries=string_list(
+                                doc.metadata, "matched_queries"
+                            ),
+                            highlight=highlight_fields(doc.metadata),
                             bm25_score=doc.bm25_score,
                             vector_score=doc.vector_score,
                             bm25_rank=doc.bm25_rank,
