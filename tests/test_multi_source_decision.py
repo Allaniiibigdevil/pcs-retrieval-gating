@@ -30,7 +30,6 @@ def _source(source_id: str, *, threshold: float, top_k: int) -> SourceConfig:
     return SourceConfig(
         source_id=source_id,
         es_index=f"pcs-{source_id}",
-        enabled=True,
         es_top_k=top_k,
         faiss_top_k=top_k + 1,
         evidence_docs_per_system=2,
@@ -39,15 +38,11 @@ def _source(source_id: str, *, threshold: float, top_k: int) -> SourceConfig:
         agreement_weight=0.20,
         semantic_match_threshold=0.30,
         lexical_match_threshold=0.30,
-        faiss_preferred_score_threshold=0.60,
-        faiss_min_score_threshold=0.30,
-        faiss_target_hits=1,
-        reranker_score_threshold=0.50,
     )
 
 
 @pytest.mark.asyncio
-async def test_multi_source_score_fusion_uses_source_top_k_and_thresholds(monkeypatch) -> None:
+async def test_multi_source_score_fusion_uses_source_top_k_and_thresholds() -> None:
     registry = SourceRegistry(
         [
             _source("photo", threshold=0.70, top_k=3),
@@ -55,16 +50,16 @@ async def test_multi_source_score_fusion_uses_source_top_k_and_thresholds(monkey
         ]
     )
     requests: list[tuple[str, str, int]] = []
-    monkeypatch.setattr(
-        "app.decision.decision_engine.build_keyword_retriever",
-        lambda source: FakeRetriever(source.source_id, "keyword", requests),
-    )
-    monkeypatch.setattr(
-        "app.decision.decision_engine.build_vector_retriever",
-        lambda source: FakeRetriever(source.source_id, "vector", requests),
-    )
 
-    response = await DecisionEngine(source_registry=registry).decide("查找记录")
+    response = await DecisionEngine(
+        source_registry=registry,
+        keyword_retriever_factory=lambda source: FakeRetriever(
+            source.source_id, "keyword", requests
+        ),
+        vector_retriever_factory=lambda source: FakeRetriever(
+            source.source_id, "vector", requests
+        ),
+    ).decide("查找记录")
 
     assert response.selected_systems == ["notepad"]
     assert {item.system_id: item.selected for item in response.decisions} == {
