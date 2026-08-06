@@ -1,20 +1,20 @@
 async def rewrite_queries(task: str) -> list[str]:
-    """Return one or more retrieval queries for the original task."""
+    """Identity placeholder for the online query-rewrite service."""
 
-    # TODO: Replace this identity implementation with your query rewriting logic.
-    # Include the original task in the returned list here if your strategy requires it.
     return [task]
 
 
 def prepare_queries(task: str, rewritten_queries: list[str]) -> list[str]:
-    """Remove blank and duplicate rewrites while guaranteeing at least one query."""
+    """Keep the original task first, then append unique non-blank rewrites."""
 
     queries: list[str] = []
     seen: set[str] = set()
-    for query in rewritten_queries:
+    for query in [task, *rewritten_queries]:
         cleaned = query.strip()
         if not cleaned or cleaned in seen:
             continue
         seen.add(cleaned)
         queries.append(cleaned)
-    return queries or [task]
+    if not queries:
+        raise ValueError("At least one non-blank query is required")
+    return queries
