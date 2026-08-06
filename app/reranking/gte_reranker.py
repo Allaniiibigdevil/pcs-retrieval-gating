@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -72,10 +73,10 @@ class GTEReranker:
         self.requested_device = device or settings.RERANKER_DEVICE
         self.batch_size = settings.RERANKER_BATCH_SIZE if batch_size is None else batch_size
         self.max_length = settings.RERANKER_MAX_LENGTH if max_length is None else max_length
-        if self.batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-        if self.max_length <= 0:
-            raise ValueError("max_length must be greater than 0")
+        if not 1 <= self.batch_size <= 256:
+            raise ValueError("batch_size must be between 1 and 256")
+        if not 8 <= self.max_length <= 8192:
+            raise ValueError("max_length must be between 8 and 8192")
 
         self._tokenizer: Any = None
         self._model: Any = None
@@ -178,8 +179,10 @@ def _resolve_device(requested: str, torch_module: Any) -> str:
     normalized = requested.strip().lower()
     if normalized == "auto":
         return "cuda" if torch_module.cuda.is_available() else "cpu"
-    if normalized.startswith("cuda") and not torch_module.cuda.is_available():
-        raise RuntimeError("RERANKER_DEVICE requests CUDA, but CUDA is unavailable")
-    if normalized == "cpu" or normalized.startswith("cuda"):
+    if normalized == "cpu":
+        return normalized
+    if re.fullmatch(r"cuda(?::\d+)?", normalized):
+        if not torch_module.cuda.is_available():
+            raise RuntimeError("RERANKER_DEVICE requests CUDA, but CUDA is unavailable")
         return normalized
     raise ValueError("RERANKER_DEVICE must be 'auto', 'cpu', 'cuda', or 'cuda:<index>'")
