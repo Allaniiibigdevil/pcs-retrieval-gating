@@ -4,12 +4,30 @@ from typing import Any
 Metadata = dict[str, Any]
 
 
+def string_list(metadata: Metadata, field: str) -> list[str]:
+    values = metadata.get(field)
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values]
+
+
+def highlight_fields(metadata: Metadata) -> dict[str, list[str]]:
+    highlight = metadata.get("highlight")
+    if not isinstance(highlight, dict):
+        return {}
+    return {
+        field: [str(value) for value in highlight[field]]
+        for field in ("summary", "keywords")
+        if isinstance(highlight.get(field), list)
+    }
+
+
 def merge_metadata(preferred: Metadata, fallback: Metadata) -> Metadata:
     """Merge retrieval evidence while keeping preferred scalar values."""
 
     merged = {**fallback, **preferred}
     _merge_query_provenance(merged, preferred, fallback)
-    _merge_list_field(merged, "matched_keywords", preferred, fallback)
+    _merge_string_list_field(merged, "matched_keywords", preferred, fallback)
     _merge_highlights(merged, preferred, fallback)
     return merged
 
@@ -42,19 +60,16 @@ def _merge_query_provenance(
         merged["matched_queries"] = unindexed_queries
 
 
-def _merge_list_field(
+def _merge_string_list_field(
     merged: Metadata,
     field: str,
     preferred: Metadata,
     fallback: Metadata,
 ) -> None:
-    values: list[Any] = []
-    seen: set[Any] = set()
+    values: list[str] = []
+    seen: set[str] = set()
     for source in (preferred, fallback):
-        raw_values = source.get(field)
-        if not isinstance(raw_values, list):
-            continue
-        for value in raw_values:
+        for value in string_list(source, field):
             if value in seen:
                 continue
             seen.add(value)
@@ -68,11 +83,9 @@ def _merge_highlights(
     preferred: Metadata,
     fallback: Metadata,
 ) -> None:
-    preferred_highlight = preferred.get("highlight")
-    fallback_highlight = fallback.get("highlight")
-    if not isinstance(preferred_highlight, dict) and not isinstance(
-        fallback_highlight, dict
-    ):
+    preferred_highlight = highlight_fields(preferred)
+    fallback_highlight = highlight_fields(fallback)
+    if not preferred_highlight and not fallback_highlight:
         return
 
     highlight: dict[str, list[str]] = {}
@@ -80,17 +93,11 @@ def _merge_highlights(
         values: list[str] = []
         seen: set[str] = set()
         for source in (preferred_highlight, fallback_highlight):
-            if not isinstance(source, dict):
-                continue
-            raw_values = source.get(field)
-            if not isinstance(raw_values, list):
-                continue
-            for value in raw_values:
-                text = str(value)
-                if text in seen:
+            for value in source.get(field, []):
+                if value in seen:
                     continue
-                seen.add(text)
-                values.append(text)
+                seen.add(value)
+                values.append(value)
         if values:
             highlight[field] = values
     if highlight:
