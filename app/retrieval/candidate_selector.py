@@ -13,17 +13,17 @@ class CandidateSelection:
 
 
 class AdaptiveCandidateSelector:
-    """Build the complete reranker set without making a second FAISS request."""
-
     def __init__(
         self,
-        preferred_vector_threshold: float | None = None,
-        min_vector_threshold: float | None = None,
-        target_vector_hits: int | None = None,
+        *,
+        source_id: str,
+        preferred_vector_threshold: float,
+        min_vector_threshold: float,
+        target_vector_hits: int,
         merger: CandidateMerger | None = None,
-        vector_selector: AdaptiveVectorCandidateSelector | None = None,
     ) -> None:
-        self.vector_selector = vector_selector or AdaptiveVectorCandidateSelector(
+        self.source_id = source_id
+        self.vector_selector = AdaptiveVectorCandidateSelector(
             preferred_threshold=preferred_vector_threshold,
             min_threshold=min_vector_threshold,
             target_hits=target_vector_hits,
@@ -37,8 +37,11 @@ class AdaptiveCandidateSelector:
     ) -> CandidateSelection:
         vector_selection = self.vector_selector.select(vector_hits)
         selected_vector_hits = vector_selection.vector_candidates
-        candidates = self.merger.merge(bm25_hits, selected_vector_hits)
-
+        candidates = self.merger.merge(
+            self.source_id,
+            bm25_hits,
+            selected_vector_hits,
+        )
         return CandidateSelection(
             candidates=candidates,
             vector_candidates=selected_vector_hits,
