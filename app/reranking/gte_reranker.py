@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 def build_reranker_passage(hit: SearchHit) -> str:
-    """Build content-only input; retrieval scores and source identity stay out."""
-
     parts: list[str] = []
     if hit.keywords:
         parts.append(f"关键词：{'；'.join(hit.keywords)}")
@@ -34,8 +32,11 @@ def attach_reranker_scores(
     scored: list[SearchHit] = []
     for candidate, score in zip(candidates, scores):
         numeric_score = float(score)
-        if not math.isfinite(numeric_score):
-            raise ValueError(f"Reranker returned a non-finite score for {candidate.doc_id}")
+        if not math.isfinite(numeric_score) or not 0.0 <= numeric_score <= 1.0:
+            raise ValueError(
+                f"Reranker returned an invalid probability for {candidate.doc_id}: "
+                f"{numeric_score}"
+            )
         copy = candidate.model_copy(deep=True)
         copy.reranker_score = numeric_score
         scored.append(copy)
@@ -52,8 +53,6 @@ def attach_reranker_scores(
 
 
 class GTEReranker:
-    """Local Alibaba GTE cross-encoder with lazy, batched inference."""
-
     def __init__(
         self,
         model_path: str | None = None,
