@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-from app.config import get_settings
 from app.schemas.search import SearchHit
 
 
@@ -11,25 +10,21 @@ class VectorCandidateSelection:
 
 
 class AdaptiveVectorCandidateSelector:
-    """Select vector candidates from one FAISS result set using an adaptive threshold."""
-
     def __init__(
         self,
-        preferred_threshold: float | None = None,
-        min_threshold: float | None = None,
-        target_hits: int | None = None,
+        *,
+        preferred_threshold: float,
+        min_threshold: float,
+        target_hits: int,
     ) -> None:
-        settings = get_settings()
-        self.preferred_threshold = (
-            settings.FAISS_PREFERRED_SCORE_THRESHOLD
-            if preferred_threshold is None
-            else preferred_threshold
-        )
-        self.min_threshold = (
-            settings.FAISS_MIN_SCORE_THRESHOLD if min_threshold is None else min_threshold
-        )
-        self.target_hits = settings.FAISS_TARGET_HITS if target_hits is None else target_hits
+        self.preferred_threshold = preferred_threshold
+        self.min_threshold = min_threshold
+        self.target_hits = target_hits
 
+        if not -1.0 <= self.min_threshold <= 1.0:
+            raise ValueError("min_threshold must be between -1 and 1")
+        if not -1.0 <= self.preferred_threshold <= 1.0:
+            raise ValueError("preferred_threshold must be between -1 and 1")
         if self.min_threshold > self.preferred_threshold:
             raise ValueError("min_threshold must not exceed preferred_threshold")
         if self.target_hits <= 0:
