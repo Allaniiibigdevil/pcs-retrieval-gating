@@ -3,6 +3,8 @@
     "photo": {
       "enabled": true,
       "es_index": "pcs_retrieval_photo",
+      "faiss_index_path": "data/artifacts/photo/faiss.index",
+      "faiss_doc_ids_path": "data/artifacts/photo/faiss_doc_ids.json",
       "es_top_k": 50,
       "faiss_top_k": 50,
       "evidence_docs_per_system": 3,
@@ -15,6 +17,8 @@
     "notepad": {
       "enabled": true,
       "es_index": "pcs_retrieval_notepad",
+      "faiss_index_path": "data/artifacts/notepad/faiss.index",
+      "faiss_doc_ids_path": "data/artifacts/notepad/faiss_doc_ids.json",
       "es_top_k": 50,
       "faiss_top_k": 50,
       "evidence_docs_per_system": 3,
