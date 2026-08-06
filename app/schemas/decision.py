@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DecideRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     task_id: str | None = None
-    task: str
+    task: str = Field(min_length=1)
 
 
 class EvidenceDoc(BaseModel):
@@ -23,7 +25,7 @@ class EvidenceDoc(BaseModel):
 class SystemDecision(BaseModel):
     system_id: str
     selected: bool
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
     evidence_docs: list[EvidenceDoc]
 
 
