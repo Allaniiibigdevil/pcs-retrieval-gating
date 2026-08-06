@@ -11,9 +11,9 @@ from app.storage.local_doc_store import LocalDocStore, load_docs_from_json_or_js
 async def run() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(
-        description="Build a shared FAISS index and one Elasticsearch index per source."
+        description="Build one shared FAISS index and one Elasticsearch index per source."
     )
-    parser.add_argument("--docs", default=None, help="SourceDoc JSON/JSONL path. Defaults to raw store.")
+    parser.add_argument("--docs", default=None, help="SourceDoc JSON/JSONL path.")
     parser.add_argument("--artifact-dir", default=None, help="Output docs/manifest directory.")
     parser.add_argument(
         "--source-config",
@@ -33,30 +33,28 @@ async def run() -> None:
     parser.add_argument(
         "--index-es",
         action="store_true",
-        help="Rebuild one configured Elasticsearch keyword index per source.",
+        help="Destructively rebuild every configured source's Elasticsearch index.",
     )
     args = parser.parse_args()
 
-    if args.docs:
-        docs = load_docs_from_json_or_jsonl(args.docs)
-    else:
-        docs = LocalDocStore().load_all()
-
+    docs = (
+        load_docs_from_json_or_jsonl(args.docs)
+        if args.docs
+        else LocalDocStore().load_all()
+    )
     source_registry = SourceRegistry.from_path(
-        args.source_config or settings.LOCAL_SOURCE_CONFIG_PATH,
-        settings=settings,
+        args.source_config or settings.LOCAL_SOURCE_CONFIG_PATH
     )
     artifact_store = LocalArtifactStore(
         artifact_dir=args.artifact_dir,
         faiss_index_path=args.faiss_index_path,
         faiss_doc_ids_path=args.faiss_doc_ids_path,
     )
-    builder = LocalIndexBuilder(
+    result = await LocalIndexBuilder(
         artifact_store=artifact_store,
         index_elasticsearch=args.index_es,
         source_registry=source_registry,
-    )
-    result = await builder.build(docs)
+    ).build(docs)
     print(
         "built_local_index "
         f"doc_count={result.doc_count} "
