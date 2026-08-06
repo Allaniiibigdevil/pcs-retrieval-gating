@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     LOCAL_DATA_DIR: str = "data"
     LOCAL_RAW_DOCS_PATH: str = "data/raw/docs.jsonl"
     LOCAL_ARTIFACT_DIR: str = "data/artifacts"
+    LOCAL_FAISS_INDEX_PATH: str = "data/artifacts/faiss.index"
+    LOCAL_FAISS_DOC_IDS_PATH: str = "data/artifacts/faiss_doc_ids.json"
 
     LOCAL_ES_URL: str = "http://127.0.0.1:9200"
     LOCAL_ES_INDEX: str = "pcs_retrieval_docs"
