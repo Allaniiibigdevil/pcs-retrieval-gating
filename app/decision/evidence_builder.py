@@ -1,5 +1,6 @@
 import re
 
+from app.retrieval.metadata import string_list
 from app.schemas.search import SearchHit
 
 
@@ -8,10 +9,12 @@ class EvidenceBuilder:
         enriched: list[SearchHit] = []
         for hit in candidates:
             copy = hit.model_copy(deep=True)
-            matched_keywords = list(copy.metadata.get("matched_keywords") or [])
+            matched_keywords = string_list(copy.metadata, "matched_keywords")
             if not matched_keywords:
                 matched_keywords = [
-                    kw for kw in copy.keywords if kw and _keyword_matches(kw, query_text)
+                    keyword
+                    for keyword in copy.keywords
+                    if keyword and _keyword_matches(keyword, query_text)
                 ]
             copy.metadata = {**copy.metadata, "matched_keywords": matched_keywords}
             enriched.append(copy)
