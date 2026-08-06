@@ -40,21 +40,12 @@ async def search_vector(request: SearchRequest) -> SearchResponse:
     return SearchResponse(query=request.query, source_id=source.source_id, hits=hits)
 
 
-def _resolve_source(source_id: str | None) -> SourceConfig:
+def _resolve_source(source_id: str) -> SourceConfig:
     registry = get_source_registry()
-    if source_id:
-        try:
-            source = registry.require(source_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"unknown source_id: {source_id}") from exc
-        if not source.enabled:
-            raise HTTPException(status_code=409, detail=f"source is disabled: {source_id}")
-        return source
-
-    enabled_sources = registry.enabled_sources
-    if len(enabled_sources) == 1:
-        return enabled_sources[0]
-    raise HTTPException(
-        status_code=400,
-        detail="source_id is required when multiple sources are enabled",
-    )
+    try:
+        source = registry.require(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown source_id: {source_id}") from exc
+    if not source.enabled:
+        raise HTTPException(status_code=409, detail=f"source is disabled: {source_id}")
+    return source
