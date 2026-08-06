@@ -27,6 +27,8 @@ class SystemAggregator:
         self,
         score_threshold: float | None = None,
         evidence_docs_per_system: int | None = None,
+        source_thresholds: dict[str, float] | None = None,
+        evidence_docs_per_source: dict[str, int] | None = None,
     ) -> None:
         settings = get_settings()
         self.score_threshold = (
@@ -39,10 +41,21 @@ class SystemAggregator:
             if evidence_docs_per_system is None
             else evidence_docs_per_system
         )
+        self.source_thresholds = dict(source_thresholds or {})
+        self.evidence_docs_per_source = dict(evidence_docs_per_source or {})
+
         if not 0.0 <= self.score_threshold <= 1.0:
             raise ValueError("score_threshold must be between 0 and 1")
         if self.evidence_docs_per_system <= 0:
             raise ValueError("evidence_docs_per_system must be greater than 0")
+        for source_id, threshold in self.source_thresholds.items():
+            if not 0.0 <= threshold <= 1.0:
+                raise ValueError(f"source threshold for {source_id!r} must be between 0 and 1")
+        for source_id, limit in self.evidence_docs_per_source.items():
+            if limit <= 0:
+                raise ValueError(
+                    f"evidence_docs_per_source for {source_id!r} must be greater than 0"
+                )
 
     def aggregate(self, reranked_docs: list[SearchHit]) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
@@ -55,11 +68,16 @@ class SystemAggregator:
             system_docs.sort(key=_doc_sort_key)
             best_score = system_docs[0].reranker_score
             assert best_score is not None
-            evidence = system_docs[: self.evidence_docs_per_system]
+            threshold = self.source_thresholds.get(system_id, self.score_threshold)
+            evidence_limit = self.evidence_docs_per_source.get(
+                system_id,
+                self.evidence_docs_per_system,
+            )
+            evidence = system_docs[:evidence_limit]
             decisions.append(
                 SystemDecision(
                     system_id=system_id,
-                    selected=best_score >= self.score_threshold,
+                    selected=best_score >= threshold,
                     reranker_score=best_score,
                     evidence_docs=[
                         EvidenceDoc(
@@ -82,7 +100,4 @@ class SystemAggregator:
                 )
             )
 
-        return sorted(
-            decisions,
-            key=lambda item: (-item.reranker_score, item.system_id),
-        )
+        return sorted(decisions, key=lambda item: (-item.reranker_score, item.system_id))
