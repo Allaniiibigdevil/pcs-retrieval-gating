@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.retrieval.factory import Retriever
+from app.retrieval.metadata import merge_metadata
 from app.schemas.search import SearchHit
 
 
@@ -94,15 +95,15 @@ def _prepare_query_hits(
 ) -> list[SearchHit]:
     prepared: list[SearchHit] = []
     for hit in hits:
-        copy = hit.model_copy(deep=True)
-        copy.metadata = _merge_metadata(
-            copy.metadata,
+        copied = hit.model_copy(deep=True)
+        copied.metadata = merge_metadata(
+            copied.metadata,
             {
                 "matched_queries": [query],
                 "matched_query_indexes": [query_index],
             },
         )
-        prepared.append(copy)
+        prepared.append(copied)
     return prepared
 
 
@@ -110,84 +111,64 @@ def _merge_ranked_hits(
     query_results: list[list[SearchHit]],
     channel: Channel,
 ) -> list[SearchHit]:
-    best_by_doc_id: dict[str, SearchHit] = {}
+    best_by_doc_id: dict[str, tuple[SearchHit, int]] = {}
     for hits in query_results:
         for hit in hits:
+            query_index = _single_query_index(hit)
             existing = best_by_doc_id.get(hit.doc_id)
             if existing is None:
-                best_by_doc_id[hit.doc_id] = hit.model_copy(deep=True)
+                best_by_doc_id[hit.doc_id] = (hit.model_copy(deep=True), query_index)
                 continue
-            if _hit_sort_key(hit, channel) < _hit_sort_key(existing, channel):
-                replacement = hit.model_copy(deep=True)
-                replacement.metadata = _merge_metadata(existing.metadata, replacement.metadata)
-                best_by_doc_id[hit.doc_id] = replacement
-            else:
-                existing.metadata = _merge_metadata(existing.metadata, hit.metadata)
 
-    merged = sorted(best_by_doc_id.values(), key=lambda hit: _hit_sort_key(hit, channel))
+            existing_hit, existing_query_index = existing
+            if _hit_sort_key(hit, channel, query_index) < _hit_sort_key(
+                existing_hit,
+                channel,
+                existing_query_index,
+            ):
+                replacement = hit.model_copy(deep=True)
+                replacement.metadata = merge_metadata(
+                    replacement.metadata,
+                    existing_hit.metadata,
+                )
+                best_by_doc_id[hit.doc_id] = (replacement, query_index)
+            else:
+                existing_hit.metadata = merge_metadata(
+                    existing_hit.metadata,
+                    hit.metadata,
+                )
+
+    merged = sorted(
+        best_by_doc_id.values(),
+        key=lambda item: _hit_sort_key(item[0], channel, item[1]),
+    )
     rank_field = "bm25_rank" if channel == "keyword" else "vector_rank"
     ranked: list[SearchHit] = []
-    for rank, hit in enumerate(merged, start=1):
-        copy = hit.model_copy(deep=True)
-        setattr(copy, rank_field, rank)
-        ranked.append(copy)
+    for rank, (hit, _) in enumerate(merged, start=1):
+        copied = hit.model_copy(deep=True)
+        setattr(copied, rank_field, rank)
+        ranked.append(copied)
     return ranked
 
 
-def _hit_sort_key(hit: SearchHit, channel: Channel) -> tuple[float, float, float, str]:
-    query_indexes = hit.metadata.get("matched_query_indexes")
-    query_index = (
-        float(query_indexes[0])
-        if isinstance(query_indexes, list) and query_indexes
-        else float("inf")
-    )
+def _single_query_index(hit: SearchHit) -> int:
+    indexes = hit.metadata.get("matched_query_indexes")
+    if not isinstance(indexes, list) or len(indexes) != 1 or not isinstance(indexes[0], int):
+        raise ValueError(
+            f"Prepared hit {hit.doc_id!r} must contain exactly one query index"
+        )
+    return indexes[0]
+
+
+def _hit_sort_key(
+    hit: SearchHit,
+    channel: Channel,
+    query_index: int,
+) -> tuple[float, float, float, str]:
     if channel == "keyword":
         rank = float(hit.bm25_rank) if hit.bm25_rank is not None else float("inf")
-        return rank, query_index, 0.0, hit.doc_id
+        return rank, float(query_index), 0.0, hit.doc_id
 
     score = hit.vector_score if hit.vector_score is not None else float("-inf")
     rank = float(hit.vector_rank) if hit.vector_rank is not None else float("inf")
-    return -score, rank, query_index, hit.doc_id
-
-
-def _merge_metadata(left: dict, right: dict) -> dict:
-    merged = {**left, **right}
-    for field in ("matched_queries", "matched_query_indexes", "matched_keywords"):
-        values: list = []
-        seen: set = set()
-        for source in (left, right):
-            raw_values = source.get(field)
-            if not isinstance(raw_values, list):
-                continue
-            for value in raw_values:
-                if value in seen:
-                    continue
-                seen.add(value)
-                values.append(value)
-        if values:
-            merged[field] = values
-
-    left_highlight = left.get("highlight")
-    right_highlight = right.get("highlight")
-    if isinstance(left_highlight, dict) or isinstance(right_highlight, dict):
-        highlight: dict[str, list[str]] = {}
-        for field in ("summary", "keywords"):
-            values: list[str] = []
-            seen: set[str] = set()
-            for source in (left_highlight, right_highlight):
-                if not isinstance(source, dict):
-                    continue
-                raw_values = source.get(field)
-                if not isinstance(raw_values, list):
-                    continue
-                for value in raw_values:
-                    text = str(value)
-                    if text in seen:
-                        continue
-                    seen.add(text)
-                    values.append(text)
-            if values:
-                highlight[field] = values
-        if highlight:
-            merged["highlight"] = highlight
-    return merged
+    return -score, rank, float(query_index), hit.doc_id
