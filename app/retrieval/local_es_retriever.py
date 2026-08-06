@@ -7,10 +7,20 @@ from app.schemas.search import SearchHit
 
 
 class LocalElasticsearchRetriever:
-    def __init__(self, base_url: str | None = None, index_name: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        source_id: str,
+        index_name: str,
+        base_url: str | None = None,
+    ) -> None:
+        if not source_id.strip() or not index_name.strip():
+            raise ValueError("source_id and index_name must not be blank")
         settings = get_settings()
+        self.source_id = source_id
+        self.index_name = index_name
         self.base_url = (base_url or settings.LOCAL_ES_URL).rstrip("/")
-        self.index_name = index_name or settings.LOCAL_ES_INDEX
+        self.timeout_seconds = settings.LOCAL_ES_TIMEOUT_SECONDS
         self.fields = [
             f"summary^{settings.LOCAL_ES_SUMMARY_BOOST}",
             f"keywords^{settings.LOCAL_ES_KEYWORDS_BOOST}",
@@ -46,6 +56,12 @@ class LocalElasticsearchRetriever:
         hits: list[SearchHit] = []
         for rank, item in enumerate(response.get("hits", {}).get("hits", []), start=1):
             source = item.get("_source", {})
+            stored_source_id = source.get("system_id")
+            if stored_source_id != self.source_id:
+                raise RuntimeError(
+                    f"Elasticsearch index {self.index_name!r} returned source "
+                    f"{stored_source_id!r}; expected {self.source_id!r}"
+                )
             highlight = item.get("highlight", {})
             metadata = dict(source.get("metadata", {}))
             if highlight:
@@ -59,7 +75,7 @@ class LocalElasticsearchRetriever:
             hits.append(
                 SearchHit(
                     doc_id=source.get("doc_id") or item.get("_id"),
-                    system_id=source["system_id"],
+                    system_id=self.source_id,
                     summary=source.get("summary"),
                     keywords=list(source.get("keywords", [])),
                     metadata=metadata,
@@ -77,7 +93,7 @@ class LocalElasticsearchRetriever:
             method=method,
             headers={"Content-Type": "application/json"},
         )
-        with request.urlopen(req, timeout=get_settings().LOCAL_ES_TIMEOUT_SECONDS) as response:
+        with request.urlopen(req, timeout=self.timeout_seconds) as response:
             payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else {}
 
@@ -90,14 +106,5 @@ def _matched_keywords_from_highlight(
     keywords: list[str],
     highlighted_keywords: list[str],
 ) -> list[str]:
-    if not highlighted_keywords:
-        return []
-
     highlighted = {_strip_highlight_tags(item) for item in highlighted_keywords}
-    matches: list[str] = []
-    seen: set[str] = set()
-    for keyword in keywords:
-        if keyword in highlighted and keyword not in seen:
-            seen.add(keyword)
-            matches.append(keyword)
-    return matches
+    return [keyword for keyword in keywords if keyword in highlighted]
