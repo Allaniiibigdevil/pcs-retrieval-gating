@@ -4,127 +4,62 @@ from app.decision.system_aggregator import SystemAggregator
 from app.schemas.search import SearchHit
 
 
-def hit(
+def _aggregator() -> SystemAggregator:
+    return SystemAggregator(
+        source_thresholds={"memo": 0.7, "album": 0.5},
+        evidence_docs_per_source={"memo": 2, "album": 1},
+    )
+
+
+def _hit(
     doc_id: str,
-    system_id: str,
-    *,
-    reranker_score: float,
-    reranker_rank: int,
-    bm25_score: float | None = None,
-    vector_score: float | None = None,
-    matched_keywords: list[str] | None = None,
+    source_id: str,
+    score: float,
+    rank: int,
 ) -> SearchHit:
     return SearchHit(
         doc_id=doc_id,
-        system_id=system_id,
+        system_id=source_id,
         summary=f"{doc_id} summary",
-        keywords=matched_keywords or [],
-        bm25_score=bm25_score,
-        vector_score=vector_score,
-        reranker_score=reranker_score,
-        reranker_rank=reranker_rank,
-        metadata={"matched_keywords": matched_keywords or []},
+        reranker_score=score,
+        reranker_rank=rank,
     )
 
 
-def test_one_relevant_document_selects_its_system() -> None:
-    aggregator = SystemAggregator(score_threshold=0.7)
-    decisions = aggregator.aggregate(
+def test_source_thresholds_and_evidence_limits_are_applied() -> None:
+    decisions = _aggregator().aggregate(
         [
-            hit("relevant", "memo", reranker_score=0.91, reranker_rank=1),
-            hit("irrelevant", "memo", reranker_score=0.12, reranker_rank=3),
-            hit("album", "album", reranker_score=0.69, reranker_rank=2),
+            _hit("memo-1", "memo", 0.80, 1),
+            _hit("memo-2", "memo", 0.60, 3),
+            _hit("memo-3", "memo", 0.50, 4),
+            _hit("album-1", "album", 0.55, 2),
         ]
     )
 
-    by_system = {decision.system_id: decision for decision in decisions}
-    assert by_system["memo"].selected is True
-    assert by_system["memo"].reranker_score == 0.91
-    assert by_system["album"].selected is False
-    assert by_system["album"].reranker_score == 0.69
+    by_source = {decision.system_id: decision for decision in decisions}
+    assert by_source["memo"].selected is True
+    assert [doc.doc_id for doc in by_source["memo"].evidence_docs] == ["memo-1", "memo-2"]
+    assert by_source["album"].selected is True
+    assert [doc.doc_id for doc in by_source["album"].evidence_docs] == ["album-1"]
 
 
-def test_system_score_is_best_document_not_sum() -> None:
-    aggregator = SystemAggregator(score_threshold=0.8)
-    decisions = aggregator.aggregate(
-        [
-            hit("first", "memo", reranker_score=0.61, reranker_rank=1),
-            hit("second", "memo", reranker_score=0.60, reranker_rank=2),
-        ]
-    )
-
-    assert decisions[0].selected is False
-    assert decisions[0].reranker_score == 0.61
-
-
-def test_system_aggregator_limits_evidence_documents() -> None:
-    aggregator = SystemAggregator(
-        score_threshold=0.5,
-        evidence_docs_per_system=3,
-    )
-    decisions = aggregator.aggregate(
-        [
-            hit(
-                f"doc-{rank}",
-                "memo",
-                reranker_score=1.0 - rank / 10,
-                reranker_rank=rank,
-            )
-            for rank in range(1, 5)
-        ]
-    )
-
-    assert [doc.doc_id for doc in decisions[0].evidence_docs] == [
-        "doc-1",
-        "doc-2",
-        "doc-3",
-    ]
-
-
-def test_system_aggregator_exposes_retrieval_and_reranker_signals() -> None:
-    aggregator = SystemAggregator(score_threshold=0.5)
-    source = hit(
-        "allergy",
-        "notepad",
-        reranker_score=0.93,
-        reranker_rank=1,
-        bm25_score=3.0,
-        vector_score=0.8,
-        matched_keywords=["海鲜过敏"],
-    )
-    source.metadata["highlight"] = {
-        "summary": ["记录了用户对<em>海鲜</em>过敏"],
-        "keywords": ["<em>海鲜过敏</em>"],
+def test_aggregator_preserves_retrieval_evidence() -> None:
+    hit = _hit("allergy", "memo", 0.93, 1)
+    hit.metadata = {
+        "matched_keywords": ["海鲜过敏"],
+        "matched_queries": ["海鲜能不能吃", "海鲜过敏"],
+        "highlight": {"keywords": ["<em>海鲜过敏</em>"]},
     }
+    evidence = _aggregator().aggregate([hit])[0].evidence_docs[0]
 
-    evidence = aggregator.aggregate([source])[0].evidence_docs[0]
-
-    assert evidence.keywords == ["海鲜过敏"]
     assert evidence.matched_keywords == ["海鲜过敏"]
-    assert evidence.bm25_score == 3.0
-    assert evidence.vector_score == 0.8
-    assert evidence.reranker_score == 0.93
-    assert evidence.reranker_rank == 1
-    assert evidence.highlight == {
-        "summary": ["记录了用户对<em>海鲜</em>过敏"],
-        "keywords": ["<em>海鲜过敏</em>"],
-    }
+    assert evidence.matched_queries == ["海鲜能不能吃", "海鲜过敏"]
+    assert evidence.highlight == {"keywords": ["<em>海鲜过敏</em>"]}
 
 
-@pytest.mark.parametrize(
-    ("score_threshold", "evidence_docs_per_system"),
-    [
-        (-0.1, 3),
-        (1.1, 3),
-        (0.5, 0),
-    ],
-)
-def test_system_aggregator_rejects_invalid_configuration(
-    score_threshold: float,
-    evidence_docs_per_system: int,
-) -> None:
-    with pytest.raises(ValueError):
-        SystemAggregator(
-            score_threshold=score_threshold,
-            evidence_docs_per_system=evidence_docs_per_system,
-        )
+def test_aggregator_rejects_unknown_sources_or_unscored_documents() -> None:
+    with pytest.raises(ValueError, match="unknown source"):
+        _aggregator().aggregate([_hit("x", "unknown", 0.8, 1)])
+
+    with pytest.raises(ValueError, match="missing score or rank"):
+        _aggregator().aggregate([SearchHit(doc_id="x", system_id="memo")])
