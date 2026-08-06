@@ -39,15 +39,9 @@ def _source(source_id: str, *, reranker_threshold: float) -> SourceConfig:
     return SourceConfig(
         source_id=source_id,
         es_index=f"pcs-{source_id}",
-        enabled=True,
         es_top_k=5,
         faiss_top_k=5,
         evidence_docs_per_system=2,
-        selection_threshold=0.60,
-        es_score_weight=0.55,
-        agreement_weight=0.20,
-        semantic_match_threshold=0.30,
-        lexical_match_threshold=0.30,
         faiss_preferred_score_threshold=0.50,
         faiss_min_score_threshold=0.20,
         faiss_target_hits=1,
@@ -56,26 +50,24 @@ def _source(source_id: str, *, reranker_threshold: float) -> SourceConfig:
 
 
 @pytest.mark.asyncio
-async def test_multi_source_reranker_batches_candidates_and_uses_source_thresholds(monkeypatch) -> None:
+async def test_multi_source_reranker_batches_candidates_and_uses_source_thresholds() -> None:
     registry = SourceRegistry(
         [
             _source("photo", reranker_threshold=0.70),
             _source("notepad", reranker_threshold=0.50),
         ]
     )
-    monkeypatch.setattr(
-        "app.decision.decision_engine.build_keyword_retriever",
-        lambda source: FakeRetriever(source.source_id, "keyword"),
-    )
-    monkeypatch.setattr(
-        "app.decision.decision_engine.build_vector_retriever",
-        lambda source: FakeRetriever(source.source_id, "vector"),
-    )
     reranker = FakeReranker()
 
     response = await DecisionEngine(
         source_registry=registry,
         reranker=reranker,
+        keyword_retriever_factory=lambda source: FakeRetriever(
+            source.source_id, "keyword"
+        ),
+        vector_retriever_factory=lambda source: FakeRetriever(
+            source.source_id, "vector"
+        ),
     ).decide("查找记录")
 
     assert reranker.calls == 1
