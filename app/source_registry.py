@@ -12,6 +12,8 @@ class SourceConfig(BaseModel):
 
     source_id: str = Field(min_length=1)
     es_index: str = Field(min_length=1)
+    faiss_index_path: str = Field(min_length=1)
+    faiss_doc_ids_path: str = Field(min_length=1)
     enabled: bool = True
     es_top_k: int = Field(ge=1, le=1000)
     faiss_top_k: int = Field(ge=1, le=1000)
@@ -37,6 +39,14 @@ class SourceRegistry:
         es_indices = [source.es_index for source in sources]
         if len(set(es_indices)) != len(es_indices):
             raise ValueError("Each source must use a distinct Elasticsearch index")
+
+        faiss_paths = [
+            path
+            for source in sources
+            for path in (source.faiss_index_path, source.faiss_doc_ids_path)
+        ]
+        if len(set(faiss_paths)) != len(faiss_paths):
+            raise ValueError("Each source must use distinct FAISS artifact paths")
 
     @property
     def enabled_sources(self) -> tuple[SourceConfig, ...]:
@@ -74,9 +84,7 @@ class SourceRegistry:
             if not isinstance(raw_config, dict):
                 raise ValueError(f"Source {source_id!r} configuration must be an object")
             sources.append(
-                SourceConfig.model_validate(
-                    {"source_id": source_id, **raw_config}
-                )
+                SourceConfig.model_validate({"source_id": source_id, **raw_config})
             )
         return cls(sources, config_path=config_path)
 
