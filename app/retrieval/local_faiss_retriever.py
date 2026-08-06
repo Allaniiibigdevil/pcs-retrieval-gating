@@ -9,26 +9,19 @@ from app.schemas.search import SearchHit
 from app.storage.local_artifact_store import LocalArtifactStore
 
 
-_DEFAULT_THRESHOLD = object()
-
-
 class LocalFaissRetriever:
     def __init__(
         self,
+        *,
+        source_id: str,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
-        source_id: str | None = None,
-        min_score_threshold: float | None | object = _DEFAULT_THRESHOLD,
     ) -> None:
-        settings = get_settings()
-        self.artifact_store = artifact_store or LocalArtifactStore()
-        self.embedding_service = embedding_service
+        if not source_id.strip():
+            raise ValueError("source_id must not be blank")
         self.source_id = source_id
-        self.min_score_threshold = (
-            getattr(settings, "FAISS_MIN_SCORE_THRESHOLD", None)
-            if min_score_threshold is _DEFAULT_THRESHOLD
-            else min_score_threshold
-        )
+        self.artifact_store = artifact_store or LocalArtifactStore()
+        self.embedding_service = embedding_service or get_embedding_service()
         self._docs_by_id: dict[str, SourceDoc] | None = None
         self._doc_ids: list[str] | None = None
         self._index = None
@@ -36,7 +29,7 @@ class LocalFaissRetriever:
         self._source_vectors: np.ndarray | None = None
 
     def _ensure_loaded(self) -> None:
-        if self._index is not None and self._docs_by_id is not None and self._doc_ids is not None:
+        if self._index is not None:
             return
 
         docs = self.artifact_store.load_docs()
@@ -44,6 +37,8 @@ class LocalFaissRetriever:
         docs_by_id = {doc.doc_id: doc for doc in docs}
         if len(docs_by_id) != len(docs):
             raise RuntimeError("Local docs artifact contains duplicate doc_id values")
+        if len(set(doc_ids)) != len(doc_ids):
+            raise RuntimeError("FAISS doc-id mapping contains duplicate doc_id values")
         if int(index.ntotal) != len(doc_ids):
             raise RuntimeError(
                 "FAISS index and doc-id mapping are inconsistent: "
@@ -57,97 +52,72 @@ class LocalFaissRetriever:
                 + ", ".join(missing_doc_ids[:5])
             )
 
+        positions = [
+            position
+            for position, doc_id in enumerate(doc_ids)
+            if docs_by_id[doc_id].system_id == self.source_id
+        ]
+        try:
+            source_vectors = (
+                np.vstack([index.reconstruct(int(position)) for position in positions]).astype(
+                    "float32", copy=False
+                )
+                if positions
+                else np.empty((0, int(index.d)), dtype="float32")
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Source-filtered FAISS retrieval requires an IndexFlatIP index that supports "
+                "vector reconstruction"
+            ) from exc
+
         self._index = index
         self._doc_ids = doc_ids
         self._docs_by_id = docs_by_id
-        if self.source_id is not None:
-            positions = [
-                position
-                for position, doc_id in enumerate(doc_ids)
-                if docs_by_id[doc_id].system_id == self.source_id
-            ]
-            self._source_positions = np.asarray(positions, dtype="int64")
-            if positions:
-                try:
-                    self._source_vectors = np.vstack(
-                        [index.reconstruct(int(position)) for position in positions]
-                    ).astype("float32", copy=False)
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Source-filtered FAISS retrieval requires an index that supports "
-                        "vector reconstruction; rebuild the shared index as IndexFlatIP"
-                    ) from exc
-            else:
-                self._source_vectors = np.empty((0, int(index.d)), dtype="float32")
-
-        if self.embedding_service is None:
-            self.embedding_service = get_embedding_service()
+        self._source_positions = np.asarray(positions, dtype="int64")
+        self._source_vectors = source_vectors
 
     async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
+        if not query.strip():
+            return []
         self._ensure_loaded()
         assert self._index is not None
         assert self._doc_ids is not None
         assert self._docs_by_id is not None
-        assert self.embedding_service is not None
-
-        if top_k <= 0 or not query.strip():
-            return []
+        assert self._source_positions is not None
+        assert self._source_vectors is not None
 
         query_embedding = await self.embedding_service.embed(query)
-        vector = np.asarray([query_embedding], dtype="float32")
-        if vector.ndim != 2 or vector.shape[0] != 1:
-            raise RuntimeError(
-                f"Query embedding must have shape (1, d), received {vector.shape}"
-            )
-        index_dim = int(self._index.d)
-        query_dim = int(vector.shape[1])
-        if query_dim != index_dim:
-            model_path = get_settings().EMBEDDING_MODEL_PATH
+        vector = np.asarray(query_embedding, dtype="float32")
+        if vector.ndim != 1:
+            raise RuntimeError(f"Query embedding must be one-dimensional, received {vector.shape}")
+        if int(vector.shape[0]) != int(self._index.d):
             raise RuntimeError(
                 "FAISS index dimension mismatch: "
-                f"index dimension is {index_dim}, query embedding dimension is {query_dim}, "
-                f"configured model is {model_path!r}. Rebuild the shared FAISS artifacts and "
-                "restart the service."
+                f"index dimension is {int(self._index.d)}, query embedding dimension is "
+                f"{int(vector.shape[0])}, configured model is "
+                f"{get_settings().EMBEDDING_MODEL_PATH!r}. Rebuild the shared FAISS artifacts."
             )
 
-        if self.source_id is None:
-            scores, indices = await asyncio.to_thread(
-                self._index.search,
-                vector,
-                min(top_k, len(self._doc_ids)),
-            )
-            ranked_pairs = [
-                (float(score), int(index))
-                for score, index in zip(scores[0], indices[0])
-                if int(index) >= 0
-            ]
-        else:
-            assert self._source_positions is not None
-            assert self._source_vectors is not None
-            ranked_pairs = await asyncio.to_thread(
-                _rank_source_vectors,
-                vector[0],
-                self._source_vectors,
-                self._source_positions,
-                top_k,
-            )
-
+        ranked_pairs = await asyncio.to_thread(
+            _rank_source_vectors,
+            vector,
+            self._source_vectors,
+            self._source_positions,
+            top_k,
+        )
         hits: list[SearchHit] = []
-        output_rank = 0
-        for score, index in ranked_pairs:
-            if self.min_score_threshold is not None and score < self.min_score_threshold:
-                continue
-            output_rank += 1
-            doc = self._docs_by_id[self._doc_ids[index]]
+        for rank, (score, position) in enumerate(ranked_pairs, start=1):
+            doc = self._docs_by_id[self._doc_ids[position]]
             hits.append(
                 SearchHit(
                     doc_id=doc.doc_id,
-                    system_id=doc.system_id,
+                    system_id=self.source_id,
                     summary=doc.summary,
                     keywords=doc.keywords,
                     metadata=doc.metadata,
                     vector_score=score,
-                    vector_rank=output_rank,
+                    vector_rank=rank,
                 )
             )
         return hits
@@ -159,7 +129,7 @@ def _rank_source_vectors(
     source_positions: np.ndarray,
     top_k: int,
 ) -> list[tuple[float, int]]:
-    if source_vectors.shape[0] == 0 or top_k <= 0:
+    if source_vectors.shape[0] == 0:
         return []
     scores = source_vectors @ query_vector
     local_order = np.argsort(-scores, kind="stable")[: min(top_k, len(scores))]
