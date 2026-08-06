@@ -1,21 +1,11 @@
-const defaultSettings = {
-  apiBase: window.location.origin.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000",
-  esTopKDocs: 50,
-  faissTopKDocs: 50,
-  faissPreferredThreshold: 0.6,
-  faissMinThreshold: 0.3,
-  faissTargetHits: 10,
-  evidenceDocsPerSystem: 3,
-  rerankerModelPath: "Alibaba-NLP/gte-multilingual-reranker-base",
-  rerankerScoreThreshold: 0.5,
-  rerankerBatchSize: 8,
-  rerankerMaxLength: 512,
-};
-
 const state = {
+  apiBase:
+    localStorage.getItem("rg.apiBase") ||
+    (window.location.origin.startsWith("http")
+      ? window.location.origin
+      : "http://127.0.0.1:8000"),
   docs: [],
-  settings: loadSettings(),
-  latestDecisionRequestId: 0,
+  latestRequestId: 0,
 };
 
 const views = document.querySelectorAll(".view");
@@ -26,39 +16,7 @@ const selectedSummary = document.querySelector("#selectedSummary");
 const latencyText = document.querySelector("#latencyText");
 const docsGrid = document.querySelector("#docsGrid");
 const docsFilterInput = document.querySelector("#docsFilterInput");
-const jsonlExample = document.querySelector("#jsonlExample");
-const decideForm = document.querySelector("#decideForm");
-const taskInput = document.querySelector("#taskInput");
-
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("rg.settingsDraft.v8") || "{}");
-    return { ...defaultSettings, ...saved };
-  } catch {
-    return { ...defaultSettings };
-  }
-}
-
-function saveSettingsDraft() {
-  localStorage.setItem("rg.settingsDraft.v8", JSON.stringify(state.settings));
-}
-
-function switchView(name) {
-  views.forEach((view) => view.classList.toggle("active", view.id === `view-${name}`));
-  navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === name));
-}
-
-function formatNumber(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "-";
-  }
-  return Number(value).toFixed(4);
-}
-
-function formatRank(value) {
-  const rank = Number(value);
-  return Number.isInteger(rank) && rank > 0 ? `#${rank}` : "-";
-}
+const apiBaseInput = document.querySelector("#apiBaseInput");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -69,178 +27,110 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function renderHighlightedText(value, fallback = "") {
-  const text = String(value ?? fallback ?? "");
-  return escapeHtml(text)
-    .replaceAll("&lt;em&gt;", '<span style="color: #dc2626; font-weight: 700;">')
-    .replaceAll("&lt;/em&gt;", "</span>");
+function formatNumber(value) {
+  return value === null || value === undefined || Number.isNaN(Number(value))
+    ? "-"
+    : Number(value).toFixed(4);
 }
 
-function highlightPlainText(value, terms = []) {
-  const text = String(value ?? "");
-  const uniqueTerms = [...new Set((terms || []).filter(Boolean).map(String))].sort((a, b) => b.length - a.length);
-  if (!text || !uniqueTerms.length) {
-    return escapeHtml(text);
-  }
-
-  const pattern = uniqueTerms.map(escapeRegExp).join("|");
-  return escapeHtml(text).replace(new RegExp(`(${pattern})`, "gi"), '<span style="color: #dc2626; font-weight: 700;">$1</span>');
+function formatRank(value) {
+  return Number.isInteger(Number(value)) ? `#${Number(value)}` : "-";
 }
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function switchView(name) {
+  views.forEach((view) => view.classList.toggle("active", view.id === `view-${name}`));
+  navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === name));
 }
 
-function renderSummaryWithHighlight(doc) {
-  const summaryHighlights = doc.highlight?.summary || doc.metadata?.highlight?.summary || [];
-  if (summaryHighlights.length) {
-    return summaryHighlights.map((item) => renderHighlightedText(item)).join(' <span class="fragment-gap">...</span> ');
-  }
-  return highlightPlainText(doc.summary || "", doc.matched_keywords || doc.metadata?.matched_keywords || []);
+function renderHighlighted(value) {
+  return escapeHtml(value)
+    .replaceAll("&lt;em&gt;", '<mark class="hit">')
+    .replaceAll("&lt;/em&gt;", "</mark>");
 }
 
-function renderKeywordBadges(keywords = [], matchedKeywords = [], highlight = {}) {
-  const matched = new Set(matchedKeywords || []);
-  const highlightedKeywords = new Map(
-    (highlight.keywords || []).map((item) => [String(item).replaceAll("<em>", "").replaceAll("</em>", ""), item]),
-  );
+function renderSummary(doc) {
+  const fragments = doc.highlight?.summary || [];
+  return fragments.length
+    ? fragments.map(renderHighlighted).join(' <span class="muted">…</span> ')
+    : escapeHtml(doc.summary || "");
+}
 
-  return (keywords || [])
-    .map((item) => {
-      const highlighted = highlightedKeywords.get(item);
-      const isMatched = matched.has(item) || highlighted;
-      return `<span class="badge keyword-badge ${isMatched ? "matched" : ""}">${
-        highlighted ? renderHighlightedText(highlighted) : highlightPlainText(item, isMatched ? [item] : [])
-      }</span>`;
-    })
+function renderKeywords(doc) {
+  const matched = new Set(doc.matched_keywords || []);
+  return (doc.keywords || [])
+    .map(
+      (keyword) =>
+        `<span class="tag ${matched.has(keyword) ? "matched" : ""}">${escapeHtml(keyword)}</span>`,
+    )
     .join("");
 }
 
-function createQueryHistoryEntry(task) {
-  messageList.querySelector(".query-history-empty")?.remove();
-  const node = document.createElement("article");
-  node.className = "query-history-item pending";
-  node.innerHTML = `
-    <div class="query-history-label">用户问题</div>
-    <div class="query-history-question">${escapeHtml(task)}</div>
-    <div class="query-history-status">生成中...</div>
-    <div class="query-history-queries"></div>
-  `;
-  messageList.prepend(node);
-  messageList.scrollTop = 0;
-  return node;
-}
-
-function completeQueryHistoryEntry(node, data) {
-  const selected = data.selected_systems || [];
-  const queries = data.rewritten_queries?.length
-    ? data.rewritten_queries
-    : [data.task].filter(Boolean);
-  node.classList.remove("pending", "error");
-  node.querySelector(".query-history-status").textContent = selected.length
-    ? `建议检索：${selected.join(", ")}`
-    : "没有选中子系统";
-  node.querySelector(".query-history-queries").innerHTML = `
-    <div class="query-history-label">改写 Query</div>
-    <ol>${queries.map((query) => `<li>${escapeHtml(query)}</li>`).join("")}</ol>
-  `;
-}
-
-function failQueryHistoryEntry(node, error) {
-  node.classList.remove("pending");
-  node.classList.add("error");
-  node.querySelector(".query-history-status").textContent = `请求失败：${error.message}`;
+function addHistory(task, status = "处理中…") {
+  document.querySelector(".history-empty")?.remove();
+  const item = document.createElement("article");
+  item.className = "history-item";
+  item.innerHTML = `<strong>${escapeHtml(task)}</strong><span>${escapeHtml(status)}</span>`;
+  messageList.prepend(item);
+  return item;
 }
 
 async function postDecide(task) {
-  const response = await fetch(`${state.settings.apiBase.replace(/\/$/, "")}/v1/decide`, {
+  const response = await fetch(`${state.apiBase.replace(/\/$/, "")}/v1/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task }),
   });
-
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    throw new Error((await response.text()) || `HTTP ${response.status}`);
   }
   return response.json();
 }
 
 function renderDecision(data) {
   const selected = data.selected_systems || [];
-  selectedSummary.textContent = selected.length ? `选中：${selected.join(", ")}` : "未选中系统";
-  selectedSummary.classList.toggle("has-selection", selected.length > 0);
-
-  const totalMs = Number(data.latency_ms?.total || 0);
-  latencyText.textContent = totalMs ? `${totalMs.toFixed(1)} ms` : "-";
+  selectedSummary.textContent = selected.length
+    ? `选中：${selected.join(", ")}`
+    : "未选中系统";
+  selectedSummary.classList.toggle("selected", selected.length > 0);
+  const total = Number(data.latency_ms?.total || 0);
+  latencyText.textContent = total ? `${total.toFixed(1)} ms` : "-";
 
   if (!data.decisions?.length) {
-    systemList.innerHTML = `<div class="empty-state">暂无候选系统</div>`;
+    systemList.innerHTML = '<div class="empty-state">没有召回到候选系统</div>';
     return;
   }
 
   systemList.innerHTML = data.decisions
-    .map((item) => {
-      const evidence = (item.evidence_docs || [])
+    .map((decision) => {
+      const evidence = (decision.evidence_docs || [])
         .map(
-          (doc) => `
-            <article class="doc-card evidence-doc-card">
-              <div class="doc-topline">
-                <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
-                <span class="badge system-badge">${escapeHtml(item.system_id)}</span>
-              </div>
-              <div class="doc-summary">${renderSummaryWithHighlight(doc)}</div>
-              <div class="keyword-list">
-                ${renderKeywordBadges(doc.keywords || doc.matched_keywords || [], doc.matched_keywords || [], doc.highlight || {})}
-              </div>
-              <div class="doc-meta">
-                <div class="reranker-result">
-                  <span>最终 Reranker 分数 <strong>${formatNumber(doc.reranker_score)}</strong></span>
-                  <span>最终 Reranker 排名 <strong>${formatRank(doc.reranker_rank)}</strong></span>
-                </div>
-                <details class="retrieval-debug">
-                  <summary>粗召回信号（不参与最终排名）</summary>
-                  <div class="retrieval-scores">
-                    <span>BM25 分数 <strong>${formatNumber(doc.bm25_score)}</strong></span>
-                    <span>FAISS 分数 <strong>${formatNumber(doc.vector_score)}</strong></span>
-                  </div>
-                  <div class="retrieval-ranks">
-                    <span>BM25 排名 <strong>${doc.bm25_rank ? formatRank(doc.bm25_rank) : "未召回"}</strong></span>
-                    <span>FAISS 排名 <strong>${doc.vector_rank ? formatRank(doc.vector_rank) : "未召回"}</strong></span>
-                  </div>
-                </details>
-              </div>
-            </article>
-          `,
+          (doc) => `<article class="doc-card">
+            <div class="card-row"><strong>${escapeHtml(doc.doc_id)}</strong><span>${escapeHtml(decision.system_id)}</span></div>
+            <p>${renderSummary(doc)}</p>
+            <div class="tags">${renderKeywords(doc)}</div>
+            <div class="metrics">
+              <span>Reranker ${formatNumber(doc.reranker_score)} ${formatRank(doc.reranker_rank)}</span>
+              <span>BM25 ${formatNumber(doc.bm25_score)} ${formatRank(doc.bm25_rank)}</span>
+              <span>Vector ${formatNumber(doc.vector_score)} ${formatRank(doc.vector_rank)}</span>
+            </div>
+            ${(doc.matched_queries || []).length ? `<div class="queries">queries: ${(doc.matched_queries || []).map(escapeHtml).join(" · ")}</div>` : ""}
+          </article>`,
         )
         .join("");
-
-      return `
-        <article class="system-card ${item.selected ? "selected" : ""}">
-          <div class="system-topline">
-            <div>
-              <div class="system-name">${escapeHtml(item.system_id)}</div>
-              <div class="system-score">最佳 Reranker 分数 ${formatNumber(item.reranker_score)}</div>
-            </div>
-            <span class="badge ${item.selected ? "selected" : ""}">${item.selected ? "selected" : "candidate"}</span>
-          </div>
-          <div class="evidence">
-            <strong>证据</strong>
-            <div class="evidence-list">${evidence || "<div>无</div>"}</div>
-          </div>
-        </article>
-      `;
+      return `<article class="system-card ${decision.selected ? "selected" : ""}">
+        <div class="card-row">
+          <h3>${escapeHtml(decision.system_id)}</h3>
+          <span class="status">${decision.selected ? "selected" : "candidate"}</span>
+        </div>
+        <div class="confidence">best reranker score ${formatNumber(decision.reranker_score)}</div>
+        <div class="evidence-list">${evidence}</div>
+      </article>`;
     })
     .join("");
 }
 
-function parseDocsText(text) {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return [];
-  }
-
-  return trimmed
+function parseDocs(text) {
+  return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
@@ -248,182 +138,63 @@ function parseDocsText(text) {
 }
 
 function renderDocs() {
-  const keyword = docsFilterInput.value.trim().toLowerCase();
-  const docs = state.docs.filter((doc) => {
-    const text = [
-      doc.doc_id,
-      doc.system_id,
-      doc.summary,
-      ...(doc.keywords || []),
-      JSON.stringify(doc.metadata || {}),
-    ]
+  const filter = docsFilterInput.value.trim().toLowerCase();
+  const docs = state.docs.filter((doc) =>
+    [doc.doc_id, doc.system_id, doc.summary, ...(doc.keywords || [])]
       .join(" ")
-      .toLowerCase();
-    return !keyword || text.includes(keyword);
-  });
-
-  if (!docs.length) {
-    docsGrid.innerHTML = `<div class="empty-state">暂无 docs</div>`;
-    return;
-  }
-
-  docsGrid.innerHTML = docs
-    .map(
-      (doc) => `
-        <article class="doc-card">
-          <div class="doc-topline">
-            <div class="doc-id">${escapeHtml(doc.doc_id)}</div>
-            <span class="badge system-badge">${escapeHtml(doc.system_id)}</span>
-          </div>
-          <div class="doc-summary">${escapeHtml(doc.summary || "")}</div>
-          <div class="keyword-list">
-            ${renderKeywordBadges(doc.keywords || [], [], doc.metadata?.highlight || {})}
-          </div>
-          <div class="doc-meta">${escapeHtml(JSON.stringify(doc.metadata || {}))}</div>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function fillSettingsForm() {
-  document.querySelector("#apiBaseInput").value = state.settings.apiBase;
-  document.querySelector("#esTopKInput").value = state.settings.esTopKDocs;
-  document.querySelector("#faissTopKInput").value = state.settings.faissTopKDocs;
-  document.querySelector("#faissPreferredThresholdInput").value = state.settings.faissPreferredThreshold;
-  document.querySelector("#faissMinThresholdInput").value = state.settings.faissMinThreshold;
-  document.querySelector("#faissTargetHitsInput").value = state.settings.faissTargetHits;
-  document.querySelector("#evidenceDocsPerSystemInput").value = state.settings.evidenceDocsPerSystem;
-  document.querySelector("#rerankerModelPathInput").value = state.settings.rerankerModelPath;
-  document.querySelector("#rerankerScoreThresholdInput").value = state.settings.rerankerScoreThreshold;
-  document.querySelector("#rerankerBatchSizeInput").value = state.settings.rerankerBatchSize;
-  document.querySelector("#rerankerMaxLengthInput").value = state.settings.rerankerMaxLength;
-  renderEnvPreview();
-}
-
-function readSettingsForm() {
-  state.settings = {
-    apiBase: document.querySelector("#apiBaseInput").value.trim() || defaultSettings.apiBase,
-    esTopKDocs: Number(document.querySelector("#esTopKInput").value || defaultSettings.esTopKDocs),
-    faissTopKDocs: Number(document.querySelector("#faissTopKInput").value || defaultSettings.faissTopKDocs),
-    faissPreferredThreshold: Number(
-      document.querySelector("#faissPreferredThresholdInput").value || defaultSettings.faissPreferredThreshold,
-    ),
-    faissMinThreshold: Number(
-      document.querySelector("#faissMinThresholdInput").value || defaultSettings.faissMinThreshold,
-    ),
-    faissTargetHits: Number(
-      document.querySelector("#faissTargetHitsInput").value || defaultSettings.faissTargetHits,
-    ),
-    evidenceDocsPerSystem: Number(
-      document.querySelector("#evidenceDocsPerSystemInput").value || defaultSettings.evidenceDocsPerSystem,
-    ),
-    rerankerModelPath:
-      document.querySelector("#rerankerModelPathInput").value.trim() || defaultSettings.rerankerModelPath,
-    rerankerScoreThreshold: Number(
-      document.querySelector("#rerankerScoreThresholdInput").value || defaultSettings.rerankerScoreThreshold,
-    ),
-    rerankerBatchSize: Number(
-      document.querySelector("#rerankerBatchSizeInput").value || defaultSettings.rerankerBatchSize,
-    ),
-    rerankerMaxLength: Number(
-      document.querySelector("#rerankerMaxLengthInput").value || defaultSettings.rerankerMaxLength,
-    ),
-  };
-  saveSettingsDraft();
-  renderEnvPreview();
-}
-
-function buildEnvPreview() {
-  return [
-    `ES_TOP_K_DOCS=${state.settings.esTopKDocs}`,
-    `FAISS_TOP_K_DOCS=${state.settings.faissTopKDocs}`,
-    `FAISS_PREFERRED_SCORE_THRESHOLD=${state.settings.faissPreferredThreshold}`,
-    `FAISS_MIN_SCORE_THRESHOLD=${state.settings.faissMinThreshold}`,
-    `FAISS_TARGET_HITS=${state.settings.faissTargetHits}`,
-    `EVIDENCE_DOCS_PER_SYSTEM=${state.settings.evidenceDocsPerSystem}`,
-    `RERANKER_MODEL_PATH=${state.settings.rerankerModelPath}`,
-    "RERANKER_LOCAL_FILES_ONLY=true",
-    "RERANKER_DEVICE=auto",
-    `RERANKER_BATCH_SIZE=${state.settings.rerankerBatchSize}`,
-    `RERANKER_MAX_LENGTH=${state.settings.rerankerMaxLength}`,
-    `RERANKER_SCORE_THRESHOLD=${state.settings.rerankerScoreThreshold}`,
-  ].join("\n");
-}
-
-function renderEnvPreview() {
-  document.querySelector("#envPreview").textContent = buildEnvPreview();
+      .toLowerCase()
+      .includes(filter),
+  );
+  docsGrid.innerHTML = docs.length
+    ? docs
+        .map(
+          (doc) => `<article class="doc-card">
+            <div class="card-row"><strong>${escapeHtml(doc.doc_id)}</strong><span>${escapeHtml(doc.system_id)}</span></div>
+            <p>${escapeHtml(doc.summary || "")}</p>
+            <div class="tags">${(doc.keywords || []).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("")}</div>
+          </article>`,
+        )
+        .join("")
+    : '<div class="empty-state">暂无文档</div>';
 }
 
 async function checkHealth() {
-  const apiStatus = document.querySelector("#apiStatus");
-  apiStatus.textContent = "检查中";
+  const status = document.querySelector("#apiStatus");
+  status.textContent = "检查中";
   try {
-    const response = await fetch(`${state.settings.apiBase.replace(/\/$/, "")}/health`);
-    apiStatus.textContent = response.ok ? "可用" : "异常";
+    const response = await fetch(`${state.apiBase.replace(/\/$/, "")}/health`);
+    status.textContent = response.ok ? "可用" : "异常";
   } catch {
-    apiStatus.textContent = "不可用";
+    status.textContent = "不可用";
   }
 }
 
-navItems.forEach((item) => {
-  item.addEventListener("click", () => switchView(item.dataset.view));
-});
+navItems.forEach((item) => item.addEventListener("click", () => switchView(item.dataset.view)));
 
-decideForm.addEventListener("submit", async (event) => {
+document.querySelector("#decideForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const task = taskInput.value.trim();
-  if (!task) {
-    return;
-  }
-
-  const requestId = ++state.latestDecisionRequestId;
-  const historyEntry = createQueryHistoryEntry(task);
-  taskInput.value = "";
-
+  const input = document.querySelector("#taskInput");
+  const task = input.value.trim();
+  if (!task) return;
+  const requestId = ++state.latestRequestId;
+  const history = addHistory(task);
+  input.value = "";
   try {
     const data = await postDecide(task);
-    completeQueryHistoryEntry(historyEntry, data);
-    if (requestId === state.latestDecisionRequestId) {
-      renderDecision(data);
-    }
+    history.querySelector("span").textContent = data.selected_systems?.length
+      ? `建议检索：${data.selected_systems.join(", ")}`
+      : "没有选中系统";
+    if (requestId === state.latestRequestId) renderDecision(data);
   } catch (error) {
-    failQueryHistoryEntry(historyEntry, error);
-    if (requestId === state.latestDecisionRequestId) {
-      systemList.innerHTML = `<div class="error-state">${escapeHtml(error.message)}</div>`;
-    }
+    history.querySelector("span").textContent = `失败：${error.message}`;
   }
-});
-
-taskInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) {
-    return;
-  }
-
-  if (event.ctrlKey) {
-    event.preventDefault();
-    taskInput.setRangeText(
-      "\n",
-      taskInput.selectionStart,
-      taskInput.selectionEnd,
-      "end",
-    );
-    return;
-  }
-
-  event.preventDefault();
-  decideForm.requestSubmit();
 });
 
 document.querySelector("#docsFileInput").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-  const text = await file.text();
+  if (!file) return;
   try {
-    state.docs = parseDocsText(text);
-    jsonlExample.open = false;
+    state.docs = parseDocs(await file.text());
     renderDocs();
   } catch (error) {
     docsGrid.innerHTML = `<div class="error-state">JSONL 解析失败：${escapeHtml(error.message)}</div>`;
@@ -433,40 +204,24 @@ document.querySelector("#docsFileInput").addEventListener("change", async (event
 document.querySelector("#loadExampleButton").addEventListener("click", async () => {
   try {
     const response = await fetch("./sample-docs.jsonl");
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    state.docs = parseDocsText(await response.text());
-    jsonlExample.open = false;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.docs = parseDocs(await response.text());
     renderDocs();
   } catch (error) {
-    docsGrid.innerHTML = `<div class="error-state">加载示例失败：${escapeHtml(error.message)}</div>`;
+    docsGrid.innerHTML = `<div class="error-state">加载失败：${escapeHtml(error.message)}</div>`;
   }
 });
 
 docsFilterInput.addEventListener("input", renderDocs);
-
-document
-  .querySelectorAll(
-    "#apiBaseInput, #esTopKInput, #faissTopKInput, #faissPreferredThresholdInput, #faissMinThresholdInput, #faissTargetHitsInput, #evidenceDocsPerSystemInput, #rerankerModelPathInput, #rerankerScoreThresholdInput, #rerankerBatchSizeInput, #rerankerMaxLengthInput",
-  )
-  .forEach((input) => {
-    input.addEventListener("input", readSettingsForm);
-  });
-
-document.querySelector("#copyEnvButton").addEventListener("click", async () => {
-  readSettingsForm();
-  await navigator.clipboard.writeText(buildEnvPreview());
-  document.querySelector("#copyEnvButton").textContent = "已复制";
-  window.setTimeout(() => {
-    document.querySelector("#copyEnvButton").textContent = "复制 .env 片段";
-  }, 1500);
+apiBaseInput.value = state.apiBase;
+apiBaseInput.addEventListener("change", () => {
+  state.apiBase = apiBaseInput.value.trim() || "http://127.0.0.1:8000";
+  localStorage.setItem("rg.apiBase", state.apiBase);
+  checkHealth();
 });
-
 document.querySelector("#healthButton").addEventListener("click", checkHealth);
 
-fillSettingsForm();
+messageList.innerHTML = '<div class="empty-state history-empty">暂无查询记录</div>';
+systemList.innerHTML = '<div class="empty-state">暂无结果</div>';
 renderDocs();
-systemList.innerHTML = `<div class="empty-state">暂无候选系统</div>`;
-messageList.innerHTML = `<div class="empty-state query-history-empty">暂无查询记录</div>`;
 checkHealth();
