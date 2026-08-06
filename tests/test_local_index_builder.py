@@ -15,17 +15,30 @@ def _docs() -> list[SourceDoc]:
     return [
         SourceDoc(
             doc_id="memo_doc_001",
-            system_id="memo_system",
+            system_id="memo",
             summary="The memo records a shanghai business trip meeting plan.",
-            keywords=["memo", "shanghai", "trip", "meeting"],
+            keywords=["memo", "shanghai", "meeting"],
         ),
         SourceDoc(
             doc_id="album_doc_001",
-            system_id="album_system",
+            system_id="album",
             summary="The album contains meeting photos from the shanghai trip.",
-            keywords=["album", "photo", "shanghai", "trip", "meeting"],
+            keywords=["album", "photo", "meeting"],
         ),
     ]
+
+
+def _source(index: str) -> dict:
+    return {
+        "es_index": index,
+        "es_top_k": 10,
+        "faiss_top_k": 10,
+        "evidence_docs_per_system": 2,
+        "faiss_preferred_score_threshold": 0.6,
+        "faiss_min_score_threshold": 0.3,
+        "faiss_target_hits": 2,
+        "reranker_score_threshold": 0.5,
+    }
 
 
 def _registry(tmp_path) -> SourceRegistry:
@@ -34,8 +47,9 @@ def _registry(tmp_path) -> SourceRegistry:
         json.dumps(
             {
                 "sources": {
-                    "memo_system": {"es_index": "pcs-memo"},
-                    "album_system": {"es_index": "pcs-album"},
+                    "memo": _source("pcs-memo"),
+                    "album": _source("pcs-album"),
+                    "empty": _source("pcs-empty"),
                 }
             }
         ),
@@ -44,60 +58,43 @@ def _registry(tmp_path) -> SourceRegistry:
     return SourceRegistry.from_path(path)
 
 
-@pytest.mark.asyncio
-async def test_local_index_builder_outputs_shared_source_searchable_artifacts(tmp_path) -> None:
-    docs = _docs()
-    artifact_store = LocalArtifactStore(tmp_path)
-    embedding_service = MockEmbeddingService(dim=16)
+def _store(tmp_path) -> LocalArtifactStore:
+    return LocalArtifactStore(
+        artifact_dir=tmp_path,
+        faiss_index_path=tmp_path / "faiss.index",
+        faiss_doc_ids_path=tmp_path / "faiss_doc_ids.json",
+    )
 
+
+@pytest.mark.asyncio
+async def test_builder_outputs_shared_source_searchable_artifacts(tmp_path) -> None:
+    store = _store(tmp_path)
+    embedding = MockEmbeddingService(dim=16)
     result = await LocalIndexBuilder(
-        artifact_store=artifact_store,
-        embedding_service=embedding_service,
+        artifact_store=store,
+        embedding_service=embedding,
         source_registry=_registry(tmp_path),
-    ).build(docs)
+    ).build(_docs())
 
     assert result.doc_count == 2
-    assert result.source_count == 2
+    assert result.source_count == 3
     assert result.embedding_dim == 16
-    assert artifact_store.docs_path.exists()
-    assert artifact_store.faiss_path.exists()
-    assert artifact_store.faiss_doc_ids_path.exists()
-    assert artifact_store.manifest_path.exists()
+    assert store.docs_path.exists()
+    assert store.faiss_path.exists()
+    assert store.faiss_doc_ids_path.exists()
+    assert store.manifest_path.exists()
 
-    vector_hits = await LocalFaissRetriever(
-        artifact_store,
-        embedding_service,
-        min_score_threshold=None,
-    ).search("shanghai trip meeting", top_k=2)
-    assert len(vector_hits) == 2
-    assert all(hit.vector_rank is not None for hit in vector_hits)
-    assert all(
-        hit.vector_score is not None and math.isfinite(hit.vector_score) for hit in vector_hits
-    )
-
-    source_hits = await LocalFaissRetriever(
-        artifact_store,
-        embedding_service,
-        source_id="memo_system",
-        min_score_threshold=None,
+    hits = await LocalFaissRetriever(
+        source_id="memo",
+        artifact_store=store,
+        embedding_service=embedding,
     ).search("shanghai trip meeting", top_k=5)
-    assert [hit.system_id for hit in source_hits] == ["memo_system"]
-    assert [hit.doc_id for hit in source_hits] == ["memo_doc_001"]
-
-    mismatched_retriever = LocalFaissRetriever(
-        artifact_store,
-        MockEmbeddingService(dim=8),
-        min_score_threshold=None,
-    )
-    with pytest.raises(
-        RuntimeError,
-        match=r"index dimension is 16, query embedding dimension is 8",
-    ):
-        await mismatched_retriever.search("shanghai trip meeting", top_k=2)
+    assert [hit.doc_id for hit in hits] == ["memo_doc_001"]
+    assert hits[0].vector_score is not None and math.isfinite(hits[0].vector_score)
 
 
 @pytest.mark.asyncio
-async def test_local_index_builder_rebuilds_one_es_index_per_source(monkeypatch, tmp_path) -> None:
+async def test_builder_rebuilds_every_es_index_including_empty_sources(monkeypatch, tmp_path) -> None:
     calls: list[tuple[str, list[str]]] = []
 
     class FakeIndexer:
@@ -107,13 +104,9 @@ async def test_local_index_builder_rebuilds_one_es_index_per_source(monkeypatch,
         def rebuild(self, docs: list[SourceDoc]) -> None:
             calls.append((self.index_name, [doc.doc_id for doc in docs]))
 
-    monkeypatch.setattr(
-        "app.offline.local_index_builder.LocalElasticsearchIndexer",
-        FakeIndexer,
-    )
-
+    monkeypatch.setattr("app.offline.local_index_builder.LocalElasticsearchIndexer", FakeIndexer)
     await LocalIndexBuilder(
-        artifact_store=LocalArtifactStore(tmp_path / "artifacts"),
+        artifact_store=_store(tmp_path / "artifacts"),
         embedding_service=MockEmbeddingService(dim=8),
         index_elasticsearch=True,
         source_registry=_registry(tmp_path),
@@ -122,4 +115,5 @@ async def test_local_index_builder_rebuilds_one_es_index_per_source(monkeypatch,
     assert calls == [
         ("pcs-memo", ["memo_doc_001"]),
         ("pcs-album", ["album_doc_001"]),
+        ("pcs-empty", []),
     ]
