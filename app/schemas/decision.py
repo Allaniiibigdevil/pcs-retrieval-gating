@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DecideRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     task_id: str | None = None
-    task: str
+    task: str = Field(min_length=1)
 
 
 class EvidenceDoc(BaseModel):
@@ -11,19 +13,20 @@ class EvidenceDoc(BaseModel):
     summary: str | None = None
     keywords: list[str] = Field(default_factory=list)
     matched_keywords: list[str] = Field(default_factory=list)
+    matched_queries: list[str] = Field(default_factory=list)
     highlight: dict[str, list[str]] = Field(default_factory=dict)
     bm25_score: float | None = None
     vector_score: float | None = None
     bm25_rank: int | None = None
     vector_rank: int | None = None
-    reranker_score: float
-    reranker_rank: int
+    reranker_score: float = Field(ge=0.0, le=1.0)
+    reranker_rank: int = Field(ge=1)
 
 
 class SystemDecision(BaseModel):
     system_id: str
     selected: bool
-    reranker_score: float
+    reranker_score: float = Field(ge=0.0, le=1.0)
     evidence_docs: list[EvidenceDoc]
 
 
