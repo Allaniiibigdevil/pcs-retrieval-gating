@@ -1,6 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.reranking.gte_reranker import (
+    GTEReranker,
+    _resolve_device,
     attach_reranker_scores,
     build_reranker_passage,
 )
@@ -38,9 +42,36 @@ def test_attach_reranker_scores_sorts_and_assigns_global_rank() -> None:
     assert candidates[0].reranker_score is None
 
 
-def test_attach_reranker_scores_rejects_length_mismatch() -> None:
+def test_attach_reranker_scores_rejects_invalid_output() -> None:
     with pytest.raises(ValueError, match="different number"):
         attach_reranker_scores(
             [SearchHit(doc_id="doc", system_id="memo")],
             [],
         )
+
+    with pytest.raises(ValueError, match="invalid probability"):
+        attach_reranker_scores(
+            [SearchHit(doc_id="doc", system_id="memo")],
+            [1.1],
+        )
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "max_length"),
+    [(0, 512), (257, 512), (8, 7), (8, 8193)],
+)
+def test_reranker_rejects_invalid_runtime_limits(batch_size: int, max_length: int) -> None:
+    with pytest.raises(ValueError):
+        GTEReranker(
+            "unused",
+            local_files_only=False,
+            batch_size=batch_size,
+            max_length=max_length,
+        )
+
+
+def test_device_parser_rejects_malformed_cuda_device() -> None:
+    torch_module = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True))
+
+    with pytest.raises(ValueError, match="cuda:<index>"):
+        _resolve_device("cuda:abc", torch_module)
