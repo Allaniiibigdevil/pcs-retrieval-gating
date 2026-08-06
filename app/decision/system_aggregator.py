@@ -24,19 +24,33 @@ def _es_score_norm(hit: SearchHit) -> float:
     return _clamp(hit.bm25_score_norm)
 
 
-def simple_doc_strength(hit: SearchHit) -> float:
-    settings = get_settings()
+def _calculate_doc_strength(
+    hit: SearchHit,
+    *,
+    es_score_weight: float,
+    agreement_weight: float,
+    semantic_match_threshold: float,
+    lexical_match_threshold: float,
+) -> float:
     semantic_score = _vector_score_norm(hit)
     lexical_score = _es_score_norm(hit)
     agreement_boost = (
-        settings.AGREEMENT_WEIGHT * math.sqrt(semantic_score * lexical_score)
-        if semantic_score >= settings.SEMANTIC_MATCH_THRESHOLD
-        and lexical_score >= settings.LEXICAL_MATCH_THRESHOLD
+        agreement_weight * math.sqrt(semantic_score * lexical_score)
+        if semantic_score >= semantic_match_threshold
+        and lexical_score >= lexical_match_threshold
         else 0.0
     )
+    return _clamp(max(semantic_score, es_score_weight * lexical_score) + agreement_boost)
 
-    return _clamp(
-        max(semantic_score, settings.ES_SCORE_WEIGHT * lexical_score) + agreement_boost
+
+def simple_doc_strength(hit: SearchHit) -> float:
+    settings = get_settings()
+    return _calculate_doc_strength(
+        hit,
+        es_score_weight=settings.ES_SCORE_WEIGHT,
+        agreement_weight=settings.AGREEMENT_WEIGHT,
+        semantic_match_threshold=settings.SEMANTIC_MATCH_THRESHOLD,
+        lexical_match_threshold=settings.LEXICAL_MATCH_THRESHOLD,
     )
 
 
@@ -63,6 +77,10 @@ class SystemAggregator:
         self,
         selection_threshold: float | None = None,
         evidence_docs_per_system: int | None = None,
+        es_score_weight: float | None = None,
+        agreement_weight: float | None = None,
+        semantic_match_threshold: float | None = None,
+        lexical_match_threshold: float | None = None,
     ) -> None:
         settings = get_settings()
         self.selection_threshold = (
@@ -75,10 +93,44 @@ class SystemAggregator:
             if evidence_docs_per_system is None
             else evidence_docs_per_system
         )
-        if not 0.0 <= self.selection_threshold <= 1.0:
-            raise ValueError("selection_threshold must be between 0 and 1")
+        self.es_score_weight = (
+            settings.ES_SCORE_WEIGHT if es_score_weight is None else es_score_weight
+        )
+        self.agreement_weight = (
+            settings.AGREEMENT_WEIGHT if agreement_weight is None else agreement_weight
+        )
+        self.semantic_match_threshold = (
+            settings.SEMANTIC_MATCH_THRESHOLD
+            if semantic_match_threshold is None
+            else semantic_match_threshold
+        )
+        self.lexical_match_threshold = (
+            settings.LEXICAL_MATCH_THRESHOLD
+            if lexical_match_threshold is None
+            else lexical_match_threshold
+        )
+
+        for name in (
+            "selection_threshold",
+            "es_score_weight",
+            "agreement_weight",
+            "semantic_match_threshold",
+            "lexical_match_threshold",
+        ):
+            value = getattr(self, name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be between 0 and 1")
         if self.evidence_docs_per_system <= 0:
             raise ValueError("evidence_docs_per_system must be greater than 0")
+
+    def doc_strength(self, hit: SearchHit) -> float:
+        return _calculate_doc_strength(
+            hit,
+            es_score_weight=self.es_score_weight,
+            agreement_weight=self.agreement_weight,
+            semantic_match_threshold=self.semantic_match_threshold,
+            lexical_match_threshold=self.lexical_match_threshold,
+        )
 
     def aggregate(self, evidence_docs: list[SearchHit]) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
@@ -89,10 +141,10 @@ class SystemAggregator:
         for system_id, docs in grouped.items():
             sorted_docs = sorted(
                 docs,
-                key=lambda doc: (-simple_doc_strength(doc), doc.doc_id),
+                key=lambda doc: (-self.doc_strength(doc), doc.doc_id),
             )
             top_docs = sorted_docs[: self.evidence_docs_per_system]
-            confidence = simple_doc_strength(top_docs[0]) if top_docs else 0.0
+            confidence = self.doc_strength(top_docs[0]) if top_docs else 0.0
             selected = confidence >= self.selection_threshold
 
             decisions.append(
@@ -119,7 +171,4 @@ class SystemAggregator:
                 )
             )
 
-        return sorted(
-            decisions,
-            key=lambda item: (-item.confidence, item.system_id),
-        )
+        return sorted(decisions, key=lambda item: (-item.confidence, item.system_id))
