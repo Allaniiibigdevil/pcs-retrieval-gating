@@ -11,24 +11,18 @@ from app.storage.local_doc_store import LocalDocStore, load_docs_from_json_or_js
 async def run() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(
-        description="Build one shared FAISS index and one Elasticsearch index per source."
+        description="Build one Elasticsearch index and one FAISS index per source."
     )
     parser.add_argument("--docs", default=None, help="SourceDoc JSON/JSONL path.")
-    parser.add_argument("--artifact-dir", default=None, help="Output docs/manifest directory.")
+    parser.add_argument(
+        "--artifact-dir",
+        default=None,
+        help="Output directory for shared docs.jsonl and manifest.json.",
+    )
     parser.add_argument(
         "--source-config",
         default=None,
         help="Source registry JSON path. Defaults to LOCAL_SOURCE_CONFIG_PATH.",
-    )
-    parser.add_argument(
-        "--faiss-index-path",
-        default=None,
-        help="Shared FAISS index output path. Defaults to LOCAL_FAISS_INDEX_PATH.",
-    )
-    parser.add_argument(
-        "--faiss-doc-ids-path",
-        default=None,
-        help="Shared FAISS doc-id mapping output path. Defaults to LOCAL_FAISS_DOC_IDS_PATH.",
     )
     parser.add_argument(
         "--index-es",
@@ -45,24 +39,18 @@ async def run() -> None:
     source_registry = SourceRegistry.from_path(
         args.source_config or settings.LOCAL_SOURCE_CONFIG_PATH
     )
-    artifact_store = LocalArtifactStore(
-        artifact_dir=args.artifact_dir,
-        faiss_index_path=args.faiss_index_path,
-        faiss_doc_ids_path=args.faiss_doc_ids_path,
-    )
     result = await LocalIndexBuilder(
-        artifact_store=artifact_store,
+        artifact_store=LocalArtifactStore(artifact_dir=args.artifact_dir),
         index_elasticsearch=args.index_es,
         source_registry=source_registry,
     ).build(docs)
     print(
-        "built_local_index "
+        "built_local_indexes "
         f"doc_count={result.doc_count} "
         f"source_count={result.source_count} "
         f"embedding_dim={result.embedding_dim} "
         f"artifact_dir={result.artifact_dir} "
-        f"faiss_index={artifact_store.faiss_path} "
-        f"faiss_doc_ids={artifact_store.faiss_doc_ids_path}"
+        f"faiss_indices={result.faiss_indices}"
     )
 
 
