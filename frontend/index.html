@@ -3,139 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Retrieval Gating Console</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <title>Retrieval Gating · Score Fusion</title>
+    <link rel="stylesheet" href="./styles.css?v=multi-source-v2" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">RG</div>
-          <div>
-            <div class="brand-title">Retrieval Gating</div>
-            <div class="brand-subtitle">Local Prototype</div>
-          </div>
-        </div>
+        <div class="brand"><div class="brand-mark">RG</div><div><strong>Retrieval Gating</strong><span>Score Fusion</span></div></div>
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" data-view="chat" type="button">对话决策</button>
+          <button class="nav-item active" data-view="chat" type="button">决策</button>
           <button class="nav-item" data-view="docs" type="button">Docs</button>
-          <button class="nav-item" data-view="settings" type="button">配置说明</button>
+          <button class="nav-item" data-view="settings" type="button">配置</button>
         </nav>
-        <div class="status-panel">
-          <div class="status-row"><span>后端状态</span><strong id="apiStatus">未检查</strong></div>
-          <button class="secondary-button compact" id="healthButton" type="button">检查连接</button>
-        </div>
+        <div class="status-panel"><span>后端：<strong id="apiStatus">未检查</strong></span><button id="healthButton" type="button">检查</button></div>
       </aside>
 
       <main class="workspace">
         <section class="view active" id="view-chat">
-          <header class="page-header">
-            <div><p class="eyebrow">Decision Debugger</p><h1>从用户问题判断应该检索哪些子系统</h1></div>
-            <div class="selected-summary" id="selectedSummary">暂无结果</div>
-          </header>
+          <header class="page-header"><div><p>Decision Debugger</p><h1>多数据源检索门控</h1></div><div id="selectedSummary" class="selected-summary">暂无结果</div></header>
           <div class="decision-layout">
-            <section class="query-panel">
-              <div class="section-title"><span class="step">输入</span><h2>用户问题</h2></div>
-              <form class="composer" id="decideForm">
-                <textarea id="taskInput" rows="5" placeholder="例如：我可以吃海鲜吗？"></textarea>
-                <div class="composer-actions"><button class="primary-button" type="submit">生成候选系统</button></div>
-              </form>
-              <div class="message-list" id="messageList"></div>
+            <section class="panel">
+              <h2>用户任务</h2>
+              <form id="decideForm" class="composer"><textarea id="taskInput" rows="5" placeholder="例如：我可以吃海鲜吗？"></textarea><button type="submit">生成候选系统</button></form>
+              <div id="messageList" class="history"></div>
             </section>
-            <section class="systems-panel">
-              <div class="section-title horizontal">
-                <div><span class="step">输出</span><h2>候选系统</h2></div>
-                <span class="meta" id="latencyText">-</span>
-              </div>
-              <div class="system-list" id="systemList"></div>
-            </section>
+            <section class="panel"><div class="section-row"><h2>候选系统</h2><span id="latencyText">-</span></div><div id="systemList" class="system-list"></div></section>
           </div>
         </section>
 
         <section class="view" id="view-docs">
-          <header class="page-header">
-            <div><p class="eyebrow">Source Documents</p><h1>查看 JSONL 格式的文档摘要</h1></div>
-            <button class="secondary-button" id="loadExampleButton" type="button">加载示例 docs</button>
-          </header>
-          <section class="docs-panel">
-            <div class="docs-toolbar">
-              <label class="file-picker"><span>选择 JSONL</span><input id="docsFileInput" type="file" accept=".jsonl,application/jsonlines,text/plain" /></label>
-              <input id="docsFilterInput" type="search" placeholder="按 doc_id、system_id、summary、keywords 过滤" />
-            </div>
-            <details class="jsonl-example" id="jsonlExample" open>
-              <summary>JSONL 示例</summary>
-              <pre>{"doc_id":"1","system_id":"photo","summary":"照片上一只狗","keywords":["宠物狗","小白"],"metadata":{}}
-{"doc_id":"2","system_id":"photo","summary":"照片是一张全家福，三口之家，小孩是男孩","keywords":["全家福"],"metadata":{}}
-{"doc_id":"3","system_id":"notepad","summary":"记录了用户对海鲜过敏","keywords":["过敏","海鲜过敏"],"metadata":{}}</pre>
-            </details>
-            <div class="docs-grid" id="docsGrid"></div>
-          </section>
+          <header class="page-header"><div><p>Source Documents</p><h1>查看建索引输入</h1></div><button id="loadExampleButton" type="button">加载示例</button></header>
+          <section class="panel"><div class="toolbar"><label>选择 JSONL <input id="docsFileInput" type="file" accept=".jsonl,text/plain" /></label><input id="docsFilterInput" type="search" placeholder="过滤文档" /></div><div id="docsGrid" class="docs-grid"></div></section>
         </section>
 
         <section class="view" id="view-settings">
-          <header class="page-header">
-            <div><p class="eyebrow">Scoring Reference</p><h1>评分配置说明</h1></div>
-            <button class="secondary-button" id="copyEnvButton" type="button">复制 .env 片段</button>
-          </header>
-          <div class="callout">
-            <strong>这个页面只生成配置草案，不会直接修改后端。</strong>
-            <p>复制 `.env` 片段到项目根目录并重启服务后生效。</p>
-          </div>
-          <div class="settings-layout">
-            <section class="settings-card">
-              <div class="section-title"><span class="step">召回</span><h2>请求规模</h2></div>
-              <div class="field-row">
-                <label for="apiBaseInput">API Base</label>
-                <input id="apiBaseInput" type="text" />
-                <p>默认使用当前页面 origin。</p>
-              </div>
-              <div class="field-row">
-                <label for="esTopKInput">ES_TOP_K_DOCS</label>
-                <input id="esTopKInput" type="number" min="1" max="1000" step="1" />
-                <p>每条 rewrite query 的 ES 召回数量。</p>
-              </div>
-              <div class="field-row">
-                <label for="faissTopKInput">FAISS_TOP_K_DOCS</label>
-                <input id="faissTopKInput" type="number" min="1" max="1000" step="1" />
-                <p>每条 rewrite query 的 FAISS 召回数量；当前分支不做最低分或自适应阈值过滤。</p>
-              </div>
-              <div class="field-row">
-                <label for="evidenceDocsInput">EVIDENCE_DOCS_PER_SYSTEM</label>
-                <input id="evidenceDocsInput" type="number" min="1" max="100" step="1" />
-                <p>每个 system 返回的证据文档数量。</p>
-              </div>
-            </section>
-
-            <section class="settings-card">
-              <div class="section-title"><span class="step">权重</span><h2>系统选择</h2></div>
-              <div class="field-row"><label for="thresholdInput">SYSTEM_SELECTION_THRESHOLD</label><input id="thresholdInput" type="number" min="0" max="1" step="0.01" /><p>系统 confidence 达到该值时进入 selected_systems。</p></div>
-              <div class="field-row"><label for="esWeightInput">ES_SCORE_WEIGHT</label><input id="esWeightInput" type="number" min="0" max="1" step="0.01" /><p>限制 ES 单路最高基础贡献。</p></div>
-              <div class="field-row"><label for="agreementWeightInput">AGREEMENT_WEIGHT</label><input id="agreementWeightInput" type="number" min="0" max="1" step="0.01" /><p>双路一致性奖励系数。</p></div>
-              <div class="field-row"><label for="semanticThresholdInput">SEMANTIC_MATCH_THRESHOLD</label><input id="semanticThresholdInput" type="number" min="0" max="1" step="0.01" /><p>触发 agreement 的最低语义分。</p></div>
-              <div class="field-row"><label for="lexicalThresholdInput">LEXICAL_MATCH_THRESHOLD</label><input id="lexicalThresholdInput" type="number" min="0" max="1" step="0.01" /><p>触发 agreement 的最低词法归一化分。</p></div>
-            </section>
-
-            <section class="formula-card">
-              <div class="section-title"><span class="step">公式</span><h2>当前 MVP 评分逻辑</h2></div>
-              <div class="formula-flow">
-                <div><strong>1. 多 query 聚合</strong><code>lexical(d) = max_q ESScore_q(d) / max_x ESScore_q(x)</code><code>semantic(d) = max_q clamp(VectorScore_q(d), 0, 1)</code></div>
-                <div><strong>2. 基础分</strong><code>base = max(semantic, ES_SCORE_WEIGHT * lexical)</code></div>
-                <div><strong>3. 一致性奖励</strong><code>agreement = AGREEMENT_WEIGHT * sqrt(semantic * lexical)</code></div>
-                <div><strong>4. 文档与系统</strong><code>doc_strength = clamp(base + agreement, 0, 1)</code><code>system_confidence = max(doc_strength)</code></div>
-              </div>
-            </section>
-
-            <section class="env-card">
-              <div class="section-title horizontal">
-                <div><span class="step">复制</span><h2>.env 片段</h2></div>
-                <span class="meta">粘贴后重启后端</span>
-              </div>
-              <pre id="envPreview"></pre>
-            </section>
+          <header class="page-header"><div><p>Effective Configuration</p><h1>真实生效的配置入口</h1></div></header>
+          <div class="config-grid">
+            <section class="panel"><h2>连接</h2><label for="apiBaseInput">API Base</label><input id="apiBaseInput" type="url" /><p class="muted">这是前端唯一会保存并实际使用的设置。</p></section>
+            <section class="panel"><h2>服务级 `.env`</h2><pre>LOCAL_SOURCE_CONFIG_PATH=config/sources.json
+LOCAL_FAISS_INDEX_PATH=data/artifacts/faiss.index
+LOCAL_FAISS_DOC_IDS_PATH=data/artifacts/faiss_doc_ids.json
+LOCAL_ES_URL=http://127.0.0.1:9200
+EMBEDDING_MODEL_PATH=BAAI/bge-small-zh-v1.5
+REWRITTEN_QUERY_ES_WEIGHT=1.0</pre></section>
+            <section class="panel"><h2>数据源级 `config/sources.json`</h2><p>每个 source 独立配置 `es_index`、ES/FAISS top-k、融合权重和选择阈值。浏览器不会修改该文件。</p></section>
+            <section class="panel"><h2>评分</h2><pre>base = max(vector_score, es_score_weight × bm25_score_norm)
+agreement = agreement_weight × √(vector_score × bm25_score_norm)
+confidence = clamp(base + agreement)
+selected = confidence ≥ source.selection_threshold</pre></section>
           </div>
         </section>
       </main>
     </div>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=multi-source-v2"></script>
   </body>
 </html>
