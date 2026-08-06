@@ -24,8 +24,10 @@ class SearchHit(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 50
+    source_id: str | None = None
 
 
 class SearchResponse(BaseModel):
     query: str
+    source_id: str | None = None
     hits: list[SearchHit]
