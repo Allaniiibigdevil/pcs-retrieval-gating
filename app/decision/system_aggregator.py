@@ -1,29 +1,12 @@
 import math
 
+from app.retrieval.metadata import highlight_fields, string_list
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
 
 
 def _clamp(value: float) -> float:
     return min(max(value, 0.0), 1.0)
-
-
-def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
-    highlight = doc.metadata.get("highlight")
-    if not isinstance(highlight, dict):
-        return {}
-    return {
-        field: [str(value) for value in highlight[field]]
-        for field in ("summary", "keywords")
-        if isinstance(highlight.get(field), list)
-    }
-
-
-def _matched_queries_from_metadata(doc: SearchHit) -> list[str]:
-    matched_queries = doc.metadata.get("matched_queries")
-    if not isinstance(matched_queries, list):
-        return []
-    return [str(value) for value in matched_queries]
 
 
 class SystemAggregator:
@@ -97,9 +80,9 @@ class SystemAggregator:
                     doc_id=doc.doc_id,
                     summary=doc.summary,
                     keywords=list(doc.keywords),
-                    matched_keywords=list(doc.metadata.get("matched_keywords", [])),
-                    matched_queries=_matched_queries_from_metadata(doc),
-                    highlight=_highlight_from_metadata(doc),
+                    matched_keywords=string_list(doc.metadata, "matched_keywords"),
+                    matched_queries=string_list(doc.metadata, "matched_queries"),
+                    highlight=highlight_fields(doc.metadata),
                     bm25_score=doc.bm25_score,
                     bm25_score_norm=doc.bm25_score_norm,
                     vector_score=doc.vector_score,
