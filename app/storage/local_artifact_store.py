@@ -8,16 +8,36 @@ from app.schemas.doc import SourceDoc
 
 
 class LocalArtifactStore:
-    def __init__(self, artifact_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        artifact_dir: str | Path | None = None,
+        faiss_index_path: str | Path | None = None,
+        faiss_doc_ids_path: str | Path | None = None,
+    ) -> None:
         settings = get_settings()
         self.artifact_dir = Path(artifact_dir or settings.LOCAL_ARTIFACT_DIR)
         self.docs_path = self.artifact_dir / "docs.jsonl"
-        self.faiss_path = self.artifact_dir / "faiss.index"
-        self.faiss_doc_ids_path = self.artifact_dir / "faiss_doc_ids.json"
         self.manifest_path = self.artifact_dir / "manifest.json"
+
+        if artifact_dir is not None:
+            self.faiss_path = Path(faiss_index_path or self.artifact_dir / "faiss.index")
+            self.faiss_doc_ids_path = Path(
+                faiss_doc_ids_path or self.artifact_dir / "faiss_doc_ids.json"
+            )
+        else:
+            self.faiss_path = Path(
+                faiss_index_path or settings.LOCAL_FAISS_INDEX_PATH
+            )
+            self.faiss_doc_ids_path = Path(
+                faiss_doc_ids_path or settings.LOCAL_FAISS_DOC_IDS_PATH
+            )
 
     def ensure_dir(self) -> None:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    def ensure_faiss_dirs(self) -> None:
+        self.faiss_path.parent.mkdir(parents=True, exist_ok=True)
+        self.faiss_doc_ids_path.parent.mkdir(parents=True, exist_ok=True)
 
     def save_docs(self, docs: list[SourceDoc]) -> None:
         self.ensure_dir()
@@ -42,7 +62,7 @@ class LocalArtifactStore:
         return docs
 
     def save_faiss(self, index: Any, doc_ids: list[str]) -> None:
-        self.ensure_dir()
+        self.ensure_faiss_dirs()
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
