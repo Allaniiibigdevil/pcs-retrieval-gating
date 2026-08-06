@@ -3,19 +3,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.config import PROJECT_ROOT, get_settings
+from app.config import get_settings
 from app.schemas.doc import SourceDoc
-
-
-def _resolve_path(path: str | Path) -> Path:
-    resolved = Path(path).expanduser()
-    return resolved if resolved.is_absolute() else PROJECT_ROOT / resolved
+from app.utils.paths import resolve_project_path
 
 
 class LocalArtifactStore:
     def __init__(self, artifact_dir: str | Path | None = None) -> None:
         configured_dir = artifact_dir or get_settings().LOCAL_ARTIFACT_DIR
-        self.artifact_dir = _resolve_path(configured_dir)
+        self.artifact_dir = resolve_project_path(configured_dir)
         self.docs_path = self.artifact_dir / "docs.jsonl"
         self.manifest_path = self.artifact_dir / "manifest.json"
 
@@ -59,8 +55,8 @@ class LocalArtifactStore:
         if len(set(doc_ids)) != len(doc_ids):
             raise ValueError("FAISS doc-id mapping contains duplicate doc_id values")
 
-        resolved_index_path = _resolve_path(index_path)
-        resolved_doc_ids_path = _resolve_path(doc_ids_path)
+        resolved_index_path = resolve_project_path(index_path)
+        resolved_doc_ids_path = resolve_project_path(doc_ids_path)
         resolved_index_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_doc_ids_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -79,8 +75,8 @@ class LocalArtifactStore:
         index_path: str | Path,
         doc_ids_path: str | Path,
     ) -> tuple[Any, list[str]]:
-        resolved_index_path = _resolve_path(index_path)
-        resolved_doc_ids_path = _resolve_path(doc_ids_path)
+        resolved_index_path = resolve_project_path(index_path)
+        resolved_doc_ids_path = resolve_project_path(doc_ids_path)
         if not resolved_index_path.exists():
             raise FileNotFoundError(f"Missing FAISS artifact: {resolved_index_path}")
         if not resolved_doc_ids_path.exists():
