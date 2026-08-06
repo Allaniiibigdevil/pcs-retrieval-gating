@@ -24,6 +24,7 @@ class BuildIndexResult:
     embedding_model: str
     embedding_dim: int
     source_count: int
+    faiss_indices: dict[str, str] = field(default_factory=dict)
     elasticsearch_indices: dict[str, str] = field(default_factory=dict)
 
 
@@ -43,11 +44,11 @@ class LocalIndexBuilder:
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
         if not docs:
-            raise ValueError("Cannot build local index from an empty document set")
+            raise ValueError("Cannot build local indexes from an empty document set")
 
         doc_ids = [doc.doc_id for doc in docs]
         if len(set(doc_ids)) != len(doc_ids):
-            raise ValueError("Cannot build shared FAISS index with duplicate doc_id values")
+            raise ValueError("Document doc_id values must be globally unique")
         self.source_registry.validate_source_ids({doc.system_id for doc in docs})
 
         embedding_texts = [build_embedding_text(doc) for doc in docs]
@@ -63,15 +64,30 @@ class LocalIndexBuilder:
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
-        index = faiss.IndexFlatIP(int(embedding_matrix.shape[1]))
-        index.add(embedding_matrix)
+        docs_by_source: dict[str, list[SourceDoc]] = defaultdict(list)
+        positions_by_source: dict[str, list[int]] = defaultdict(list)
+        for position, doc in enumerate(docs):
+            docs_by_source[doc.system_id].append(doc)
+            positions_by_source[doc.system_id].append(position)
 
         self.artifact_store.save_docs(docs)
-        self.artifact_store.save_faiss(index, doc_ids)
-
-        docs_by_source: dict[str, list[SourceDoc]] = defaultdict(list)
-        for doc in docs:
-            docs_by_source[doc.system_id].append(doc)
+        faiss_indices: dict[str, str] = {}
+        for source in self.source_registry.sources:
+            source_docs = docs_by_source.get(source.source_id, [])
+            source_positions = positions_by_source.get(source.source_id, [])
+            index = faiss.IndexFlatIP(int(embedding_matrix.shape[1]))
+            if source_positions:
+                source_vectors = embedding_matrix[
+                    np.asarray(source_positions, dtype="int64")
+                ]
+                index.add(source_vectors)
+            self.artifact_store.save_faiss(
+                index,
+                [doc.doc_id for doc in source_docs],
+                index_path=source.faiss_index_path,
+                doc_ids_path=source.faiss_doc_ids_path,
+            )
+            faiss_indices[source.source_id] = source.faiss_index_path
 
         elasticsearch_indices: dict[str, str] = {}
         if self.index_elasticsearch:
@@ -83,7 +99,7 @@ class LocalIndexBuilder:
 
         self.artifact_store.save_manifest(
             {
-                "version": 2,
+                "version": 3,
                 "built_at": datetime.now(UTC).isoformat(),
                 "doc_count": len(docs),
                 "source_count": len(self.source_registry.sources),
@@ -91,13 +107,15 @@ class LocalIndexBuilder:
                     source.source_id: {
                         "doc_count": len(docs_by_source.get(source.source_id, [])),
                         "elasticsearch_index": source.es_index,
+                        "faiss_index_path": source.faiss_index_path,
+                        "faiss_doc_ids_path": source.faiss_doc_ids_path,
                     }
                     for source in self.source_registry.sources
                 },
                 "keyword_retriever": "local_es_per_source",
+                "vector_retriever": "local_faiss_per_source",
                 "elasticsearch_indexed": self.index_elasticsearch,
                 "elasticsearch_url": self.settings.LOCAL_ES_URL,
-                "elasticsearch_indices": elasticsearch_indices,
                 "source_config_path": (
                     str(self.source_registry.config_path)
                     if self.source_registry.config_path is not None
@@ -106,9 +124,7 @@ class LocalIndexBuilder:
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": int(embedding_matrix.shape[1]),
-                "faiss_index": "IndexFlatIP",
-                "faiss_index_path": str(self.artifact_store.faiss_path),
-                "faiss_doc_ids_path": str(self.artifact_store.faiss_doc_ids_path),
+                "faiss_index_type": "IndexFlatIP",
             }
         )
         return BuildIndexResult(
@@ -117,5 +133,6 @@ class LocalIndexBuilder:
             embedding_model=self.settings.EMBEDDING_MODEL_PATH,
             embedding_dim=int(embedding_matrix.shape[1]),
             source_count=len(self.source_registry.sources),
+            faiss_indices=faiss_indices,
             elasticsearch_indices=elasticsearch_indices,
         )
