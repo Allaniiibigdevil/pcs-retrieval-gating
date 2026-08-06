@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-from app.config import get_settings
 from app.schemas.decision import EvidenceDoc, SystemDecision
 from app.schemas.search import SearchHit
 
@@ -16,6 +15,11 @@ def _highlight_from_metadata(doc: SearchHit) -> dict[str, list[str]]:
     }
 
 
+def _matched_queries_from_metadata(doc: SearchHit) -> list[str]:
+    values = doc.metadata.get("matched_queries")
+    return [str(value) for value in values] if isinstance(values, list) else []
+
+
 def _doc_sort_key(doc: SearchHit) -> tuple[int, float, str]:
     rank = doc.reranker_rank if doc.reranker_rank is not None else 2**31 - 1
     score = doc.reranker_score if doc.reranker_score is not None else float("-inf")
@@ -25,59 +29,47 @@ def _doc_sort_key(doc: SearchHit) -> tuple[int, float, str]:
 class SystemAggregator:
     def __init__(
         self,
-        score_threshold: float | None = None,
-        evidence_docs_per_system: int | None = None,
-        source_thresholds: dict[str, float] | None = None,
-        evidence_docs_per_source: dict[str, int] | None = None,
+        *,
+        source_thresholds: dict[str, float],
+        evidence_docs_per_source: dict[str, int],
     ) -> None:
-        settings = get_settings()
-        self.score_threshold = (
-            settings.RERANKER_SCORE_THRESHOLD
-            if score_threshold is None
-            else score_threshold
-        )
-        self.evidence_docs_per_system = (
-            settings.EVIDENCE_DOCS_PER_SYSTEM
-            if evidence_docs_per_system is None
-            else evidence_docs_per_system
-        )
-        self.source_thresholds = dict(source_thresholds or {})
-        self.evidence_docs_per_source = dict(evidence_docs_per_source or {})
+        if not source_thresholds:
+            raise ValueError("source_thresholds must not be empty")
+        if set(source_thresholds) != set(evidence_docs_per_source):
+            raise ValueError(
+                "source_thresholds and evidence_docs_per_source must contain the same sources"
+            )
+        self.source_thresholds = dict(source_thresholds)
+        self.evidence_docs_per_source = dict(evidence_docs_per_source)
 
-        if not 0.0 <= self.score_threshold <= 1.0:
-            raise ValueError("score_threshold must be between 0 and 1")
-        if self.evidence_docs_per_system <= 0:
-            raise ValueError("evidence_docs_per_system must be greater than 0")
         for source_id, threshold in self.source_thresholds.items():
             if not 0.0 <= threshold <= 1.0:
                 raise ValueError(f"source threshold for {source_id!r} must be between 0 and 1")
         for source_id, limit in self.evidence_docs_per_source.items():
             if limit <= 0:
                 raise ValueError(
-                    f"evidence_docs_per_source for {source_id!r} must be greater than 0"
+                    f"evidence document limit for {source_id!r} must be greater than 0"
                 )
 
     def aggregate(self, reranked_docs: list[SearchHit]) -> list[SystemDecision]:
         grouped: dict[str, list[SearchHit]] = defaultdict(list)
         for doc in reranked_docs:
-            if doc.reranker_score is not None and doc.reranker_rank is not None:
-                grouped[doc.system_id].append(doc)
+            if doc.system_id not in self.source_thresholds:
+                raise ValueError(f"Reranked document has unknown source {doc.system_id!r}")
+            if doc.reranker_score is None or doc.reranker_rank is None:
+                raise ValueError(f"Reranked document {doc.doc_id!r} is missing score or rank")
+            grouped[doc.system_id].append(doc)
 
         decisions: list[SystemDecision] = []
         for system_id, system_docs in grouped.items():
             system_docs.sort(key=_doc_sort_key)
             best_score = system_docs[0].reranker_score
             assert best_score is not None
-            threshold = self.source_thresholds.get(system_id, self.score_threshold)
-            evidence_limit = self.evidence_docs_per_source.get(
-                system_id,
-                self.evidence_docs_per_system,
-            )
-            evidence = system_docs[:evidence_limit]
+            evidence = system_docs[: self.evidence_docs_per_source[system_id]]
             decisions.append(
                 SystemDecision(
                     system_id=system_id,
-                    selected=best_score >= threshold,
+                    selected=best_score >= self.source_thresholds[system_id],
                     reranker_score=best_score,
                     evidence_docs=[
                         EvidenceDoc(
@@ -85,6 +77,7 @@ class SystemAggregator:
                             summary=doc.summary,
                             keywords=list(doc.keywords),
                             matched_keywords=list(doc.metadata.get("matched_keywords", [])),
+                            matched_queries=_matched_queries_from_metadata(doc),
                             highlight=_highlight_from_metadata(doc),
                             bm25_score=doc.bm25_score,
                             vector_score=doc.vector_score,
@@ -94,8 +87,6 @@ class SystemAggregator:
                             reranker_rank=doc.reranker_rank,
                         )
                         for doc in evidence
-                        if doc.reranker_score is not None
-                        and doc.reranker_rank is not None
                     ],
                 )
             )
