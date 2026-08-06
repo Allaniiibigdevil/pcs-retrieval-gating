@@ -1,0 +1,36 @@
+{
+  "sources": {
+    "photo": {
+      "enabled": true,
+      "es_index": "pcs_retrieval_photo",
+      "es_top_k": 50,
+      "faiss_top_k": 50,
+      "evidence_docs_per_system": 3,
+      "selection_threshold": 0.55,
+      "es_score_weight": 0.45,
+      "agreement_weight": 0.20,
+      "semantic_match_threshold": 0.30,
+      "lexical_match_threshold": 0.25,
+      "faiss_preferred_score_threshold": 0.55,
+      "faiss_min_score_threshold": 0.30,
+      "faiss_target_hits": 10,
+      "reranker_score_threshold": 0.50
+    },
+    "notepad": {
+      "enabled": true,
+      "es_index": "pcs_retrieval_notepad",
+      "es_top_k": 50,
+      "faiss_top_k": 50,
+      "evidence_docs_per_system": 3,
+      "selection_threshold": 0.60,
+      "es_score_weight": 0.55,
+      "agreement_weight": 0.20,
+      "semantic_match_threshold": 0.30,
+      "lexical_match_threshold": 0.30,
+      "faiss_preferred_score_threshold": 0.60,
+      "faiss_min_score_threshold": 0.30,
+      "faiss_target_hits": 10,
+      "reranker_score_threshold": 0.55
+    }
+  }
+}
