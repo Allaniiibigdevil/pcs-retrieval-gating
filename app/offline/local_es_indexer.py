@@ -18,25 +18,26 @@ class ElasticsearchRequestError(RuntimeError):
 
 
 class LocalElasticsearchIndexer:
-    def __init__(self, base_url: str | None = None, index_name: str | None = None) -> None:
+    def __init__(self, index_name: str, base_url: str | None = None) -> None:
+        if not index_name.strip():
+            raise ValueError("index_name must not be blank")
         settings = get_settings()
         self.settings = settings
         self.base_url = (base_url or settings.LOCAL_ES_URL).rstrip("/")
-        self.index_name = index_name or settings.LOCAL_ES_INDEX
+        self.index_name = index_name
 
     def rebuild(self, docs: list[SourceDoc]) -> None:
         self._delete_index_if_exists()
         self._request("PUT", f"/{self.index_name}", self._mapping())
-        self._bulk_index(docs)
+        if docs:
+            self._bulk_index(docs)
         self._request("POST", f"/{self.index_name}/_refresh")
 
     def _mapping(self) -> dict:
-        analyzer = self.settings.LOCAL_ES_ANALYZER
-        search_analyzer = self.settings.LOCAL_ES_SEARCH_ANALYZER
         text_field = {
             "type": "text",
-            "analyzer": analyzer,
-            "search_analyzer": search_analyzer,
+            "analyzer": self.settings.LOCAL_ES_ANALYZER,
+            "search_analyzer": self.settings.LOCAL_ES_SEARCH_ANALYZER,
         }
         return {
             "settings": {
@@ -50,6 +51,7 @@ class LocalElasticsearchIndexer:
                     "summary": text_field,
                     "keywords": text_field,
                     "metadata": {"enabled": False},
+                    "updated_at": {"type": "date"},
                 }
             },
         }
