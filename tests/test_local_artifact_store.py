@@ -1,41 +1,48 @@
-from types import SimpleNamespace
+import numpy as np
+import pytest
 
 from app.storage.local_artifact_store import LocalArtifactStore
 
 
-def _settings(artifact_dir, shared_dir):
-    return SimpleNamespace(
-        LOCAL_ARTIFACT_DIR=str(artifact_dir),
-        LOCAL_FAISS_INDEX_PATH=str(shared_dir / "shared.index"),
-        LOCAL_FAISS_DOC_IDS_PATH=str(shared_dir / "shared_doc_ids.json"),
+def test_store_writes_and_loads_distinct_source_faiss_artifacts(tmp_path) -> None:
+    faiss = pytest.importorskip("faiss")
+    store = LocalArtifactStore(artifact_dir=tmp_path / "shared")
+
+    photo_index = faiss.IndexFlatIP(2)
+    photo_index.add(np.asarray([[1.0, 0.0]], dtype="float32"))
+    notepad_index = faiss.IndexFlatIP(2)
+    notepad_index.add(np.asarray([[0.0, 1.0]], dtype="float32"))
+
+    photo_path = tmp_path / "photo" / "faiss.index"
+    photo_ids_path = tmp_path / "photo" / "faiss_doc_ids.json"
+    notepad_path = tmp_path / "notepad" / "faiss.index"
+    notepad_ids_path = tmp_path / "notepad" / "faiss_doc_ids.json"
+
+    store.save_faiss(
+        photo_index,
+        ["photo-1"],
+        index_path=photo_path,
+        doc_ids_path=photo_ids_path,
+    )
+    store.save_faiss(
+        notepad_index,
+        ["notepad-1"],
+        index_path=notepad_path,
+        doc_ids_path=notepad_ids_path,
     )
 
-
-def test_default_store_uses_configured_shared_faiss_paths(monkeypatch, tmp_path) -> None:
-    artifact_dir = tmp_path / "artifacts"
-    shared_dir = tmp_path / "shared-faiss"
-    monkeypatch.setattr(
-        "app.storage.local_artifact_store.get_settings",
-        lambda: _settings(artifact_dir, shared_dir),
+    loaded_photo, photo_ids = store.load_faiss(
+        index_path=photo_path,
+        doc_ids_path=photo_ids_path,
+    )
+    loaded_notepad, notepad_ids = store.load_faiss(
+        index_path=notepad_path,
+        doc_ids_path=notepad_ids_path,
     )
 
-    store = LocalArtifactStore()
-
-    assert store.artifact_dir == artifact_dir
-    assert store.faiss_path == shared_dir / "shared.index"
-    assert store.faiss_doc_ids_path == shared_dir / "shared_doc_ids.json"
-
-
-def test_artifact_directory_does_not_override_shared_faiss_paths(monkeypatch, tmp_path) -> None:
-    configured_dir = tmp_path / "configured"
-    shared_dir = tmp_path / "shared"
-    monkeypatch.setattr(
-        "app.storage.local_artifact_store.get_settings",
-        lambda: _settings(configured_dir, shared_dir),
-    )
-
-    store = LocalArtifactStore(artifact_dir=tmp_path / "other-artifacts")
-
-    assert store.docs_path == tmp_path / "other-artifacts" / "docs.jsonl"
-    assert store.faiss_path == shared_dir / "shared.index"
-    assert store.faiss_doc_ids_path == shared_dir / "shared_doc_ids.json"
+    assert photo_path != notepad_path
+    assert photo_ids_path != notepad_ids_path
+    assert int(loaded_photo.ntotal) == 1
+    assert int(loaded_notepad.ntotal) == 1
+    assert photo_ids == ["photo-1"]
+    assert notepad_ids == ["notepad-1"]
