@@ -10,11 +10,7 @@
       "es_score_weight": 0.45,
       "agreement_weight": 0.20,
       "semantic_match_threshold": 0.30,
-      "lexical_match_threshold": 0.25,
-      "faiss_preferred_score_threshold": 0.55,
-      "faiss_min_score_threshold": 0.30,
-      "faiss_target_hits": 10,
-      "reranker_score_threshold": 0.50
+      "lexical_match_threshold": 0.25
     },
     "notepad": {
       "enabled": true,
@@ -26,11 +22,7 @@
       "es_score_weight": 0.55,
       "agreement_weight": 0.20,
       "semantic_match_threshold": 0.30,
-      "lexical_match_threshold": 0.30,
-      "faiss_preferred_score_threshold": 0.60,
-      "faiss_min_score_threshold": 0.30,
-      "faiss_target_hits": 10,
-      "reranker_score_threshold": 0.55
+      "lexical_match_threshold": 0.30
     }
   }
 }
