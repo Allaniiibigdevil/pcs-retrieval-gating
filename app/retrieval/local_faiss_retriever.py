@@ -1,4 +1,5 @@
 import asyncio
+from threading import Lock
 
 import numpy as np
 
@@ -29,58 +30,62 @@ class LocalFaissRetriever:
         self._docs_by_id: dict[str, SourceDoc] | None = None
         self._doc_ids: list[str] | None = None
         self._index = None
+        self._load_lock = Lock()
 
     def _ensure_loaded(self) -> None:
         if self._index is not None:
             return
+        with self._load_lock:
+            if self._index is not None:
+                return
 
-        docs = self.artifact_store.load_docs()
-        index, doc_ids = self.artifact_store.load_faiss(
-            index_path=self.faiss_index_path,
-            doc_ids_path=self.faiss_doc_ids_path,
-        )
-        docs_by_id = {doc.doc_id: doc for doc in docs}
-        if len(docs_by_id) != len(docs):
-            raise RuntimeError("Local docs artifact contains duplicate doc_id values")
-
-        missing_doc_ids = [doc_id for doc_id in doc_ids if doc_id not in docs_by_id]
-        if missing_doc_ids:
-            raise RuntimeError(
-                "FAISS doc-id mapping references documents missing from docs.jsonl: "
-                + ", ".join(missing_doc_ids[:5])
+            docs = self.artifact_store.load_docs()
+            index, doc_ids = self.artifact_store.load_faiss(
+                index_path=self.faiss_index_path,
+                doc_ids_path=self.faiss_doc_ids_path,
             )
+            docs_by_id = {doc.doc_id: doc for doc in docs}
+            if len(docs_by_id) != len(docs):
+                raise RuntimeError("Local docs artifact contains duplicate doc_id values")
 
-        mismatched_doc_ids = [
-            doc_id
-            for doc_id in doc_ids
-            if docs_by_id[doc_id].system_id != self.source_id
-        ]
-        if mismatched_doc_ids:
-            raise RuntimeError(
-                f"FAISS index for source {self.source_id!r} contains documents from "
-                "another source: "
-                + ", ".join(mismatched_doc_ids[:5])
-            )
+            missing_doc_ids = [doc_id for doc_id in doc_ids if doc_id not in docs_by_id]
+            if missing_doc_ids:
+                raise RuntimeError(
+                    "FAISS doc-id mapping references documents missing from docs.jsonl: "
+                    + ", ".join(missing_doc_ids[:5])
+                )
 
-        expected_doc_ids = {
-            doc.doc_id for doc in docs if doc.system_id == self.source_id
-        }
-        if set(doc_ids) != expected_doc_ids:
-            missing_from_index = sorted(expected_doc_ids - set(doc_ids))
-            unexpected_in_index = sorted(set(doc_ids) - expected_doc_ids)
-            raise RuntimeError(
-                f"FAISS artifacts for source {self.source_id!r} are stale or incomplete; "
-                f"missing={missing_from_index[:5]} unexpected={unexpected_in_index[:5]}"
-            )
+            mismatched_doc_ids = [
+                doc_id
+                for doc_id in doc_ids
+                if docs_by_id[doc_id].system_id != self.source_id
+            ]
+            if mismatched_doc_ids:
+                raise RuntimeError(
+                    f"FAISS index for source {self.source_id!r} contains documents from "
+                    "another source: "
+                    + ", ".join(mismatched_doc_ids[:5])
+                )
 
-        self._index = index
-        self._doc_ids = doc_ids
-        self._docs_by_id = docs_by_id
+            expected_doc_ids = {
+                doc.doc_id for doc in docs if doc.system_id == self.source_id
+            }
+            if set(doc_ids) != expected_doc_ids:
+                missing_from_index = sorted(expected_doc_ids - set(doc_ids))
+                unexpected_in_index = sorted(set(doc_ids) - expected_doc_ids)
+                raise RuntimeError(
+                    f"FAISS artifacts for source {self.source_id!r} are stale or incomplete; "
+                    f"missing={missing_from_index[:5]} unexpected={unexpected_in_index[:5]}"
+                )
+
+            self._index = index
+            self._doc_ids = doc_ids
+            self._docs_by_id = docs_by_id
 
     async def search(self, query: str, top_k: int = 50) -> list[SearchHit]:
         if top_k <= 0 or not query.strip():
             return []
-        self._ensure_loaded()
+        await asyncio.to_thread(self._ensure_loaded)
         assert self._index is not None
         assert self._doc_ids is not None
         assert self._docs_by_id is not None
