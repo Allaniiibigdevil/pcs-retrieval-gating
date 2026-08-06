@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import math
 import random
+from functools import lru_cache
 from typing import Protocol
 
 from app.config import get_settings
@@ -36,8 +37,7 @@ class MockEmbeddingService:
 
 class BGEEmbeddingService:
     def __init__(self, model_path: str | None = None) -> None:
-        settings = get_settings()
-        self.model_path = model_path or settings.EMBEDDING_MODEL_PATH
+        self.model_path = model_path or get_settings().EMBEDDING_MODEL_PATH
         self._model = None
 
     @property
@@ -64,9 +64,10 @@ class BGEEmbeddingService:
 
 def build_embedding_text(doc: SourceDoc) -> str:
     keywords = ", ".join(doc.keywords)
-    return f"system: {doc.system_id}\nsummary: {doc.summary}\nkeywords: {keywords}"
+    return f"summary: {doc.summary}\nkeywords: {keywords}"
 
 
+@lru_cache
 def get_embedding_service() -> EmbeddingService:
     settings = get_settings()
     if settings.EMBEDDING_PROVIDER == "mock":
