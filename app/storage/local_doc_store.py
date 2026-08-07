@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 from app.config import get_settings
@@ -31,6 +32,38 @@ class LocalDocStore:
         for doc in docs:
             existing[doc.doc_id] = doc
         self.save_all(list(existing.values()))
+
+
+def iter_docs_from_jsonl(
+    path: str | Path,
+    *,
+    source_id: str | None = None,
+) -> Iterator[SourceDoc]:
+    input_path = resolve_project_path(path)
+    if input_path.suffix.lower() != ".jsonl":
+        raise ValueError("Streaming index build requires a .jsonl input file")
+    if not input_path.exists():
+        raise FileNotFoundError(f"Missing SourceDoc JSONL: {input_path}")
+
+    with input_path.open("rb") as file:
+        for line_no, raw_line in enumerate(file, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                doc = SourceDoc.model_validate_json(line)
+            except Exception as exc:
+                raise ValueError(f"Invalid SourceDoc JSONL at {input_path}:{line_no}") from exc
+            if source_id is None or doc.system_id == source_id:
+                yield doc
+
+
+def count_docs_from_jsonl(
+    path: str | Path,
+    *,
+    source_id: str | None = None,
+) -> int:
+    return sum(1 for _ in iter_docs_from_jsonl(path, source_id=source_id))
 
 
 def load_docs_from_json_or_jsonl(
