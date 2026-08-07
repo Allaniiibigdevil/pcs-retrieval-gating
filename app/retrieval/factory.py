@@ -1,10 +1,12 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Protocol
 
 from app.retrieval.local_es_retriever import LocalElasticsearchRetriever
 from app.retrieval.local_faiss_retriever import LocalFaissRetriever
 from app.schemas.search import SearchHit
 from app.source_registry import SourceConfig
+from app.storage.local_artifact_store import LocalArtifactStore
 
 
 class Retriever(Protocol):
@@ -26,4 +28,7 @@ def build_vector_retriever(source: SourceConfig) -> Retriever:
         source_id=source.source_id,
         faiss_index_path=source.faiss_index_path,
         faiss_doc_ids_path=source.faiss_doc_ids_path,
+        artifact_store=LocalArtifactStore(
+            artifact_dir=Path(source.faiss_index_path).parent
+        ),
     )
