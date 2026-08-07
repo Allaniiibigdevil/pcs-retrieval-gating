@@ -14,7 +14,12 @@ class EmbeddingService(Protocol):
     async def embed(self, text: str) -> list[float]:
         ...
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        show_progress: bool = False,
+    ) -> list[list[float]]:
         ...
 
 
@@ -27,7 +32,13 @@ class MockEmbeddingService:
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        show_progress: bool = False,
+    ) -> list[list[float]]:
+        del show_progress
         return [self._embed_one(text) for text in texts]
 
     def _embed_one(self, text: str) -> list[float]:
@@ -42,7 +53,6 @@ class BGEEmbeddingService:
     def __init__(self, model_path: str | None = None) -> None:
         settings = get_settings()
         self.model_path = model_path or settings.EMBEDDING_MODEL_PATH
-        self.batch_size = settings.EMBEDDING_BATCH_SIZE
         self._model: Any = None
         self._load_lock = Lock()
         self._inference_lock = Lock()
@@ -50,20 +60,24 @@ class BGEEmbeddingService:
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        show_progress: bool = False,
+    ) -> list[list[float]]:
         if not texts:
             return []
-        return await asyncio.to_thread(self._encode, texts)
+        return await asyncio.to_thread(self._encode, texts, show_progress)
 
-    def _encode(self, texts: list[str]) -> list[list[float]]:
+    def _encode(self, texts: list[str], show_progress: bool = False) -> list[list[float]]:
         model = self._ensure_model()
         with self._inference_lock:
             embeddings = model.encode(
                 texts,
-                batch_size=self.batch_size,
                 normalize_embeddings=True,
                 convert_to_numpy=True,
-                show_progress_bar=False,
+                show_progress_bar=show_progress,
             )
         return embeddings.astype("float32").tolist()
 
