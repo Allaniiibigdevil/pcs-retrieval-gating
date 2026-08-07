@@ -11,6 +11,21 @@ from app.source_registry import SourceRegistry
 from app.storage.local_artifact_store import LocalArtifactStore
 
 
+class CountingEmbeddingService(MockEmbeddingService):
+    def __init__(self, dim: int) -> None:
+        super().__init__(dim=dim)
+        self.calls: list[list[str]] = []
+
+    async def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        show_progress: bool = False,
+    ) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return await super().embed_batch(texts, show_progress=show_progress)
+
+
 def _docs() -> list[SourceDoc]:
     return [
         SourceDoc(
@@ -69,7 +84,7 @@ def _store(tmp_path) -> LocalArtifactStore:
 async def test_builder_outputs_one_faiss_index_per_source(tmp_path) -> None:
     store = _store(tmp_path)
     registry = _registry(tmp_path)
-    embedding = MockEmbeddingService(dim=16)
+    embedding = CountingEmbeddingService(dim=16)
     result = await LocalIndexBuilder(
         artifact_store=store,
         embedding_service=embedding,
@@ -79,6 +94,8 @@ async def test_builder_outputs_one_faiss_index_per_source(tmp_path) -> None:
     assert result.doc_count == 2
     assert result.source_count == 3
     assert result.embedding_dim == 16
+    assert len(embedding.calls) == 1
+    assert len(embedding.calls[0]) == 2
     assert store.docs_path.exists()
     assert store.manifest_path.exists()
 
