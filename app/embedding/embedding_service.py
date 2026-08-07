@@ -40,7 +40,9 @@ class MockEmbeddingService:
 
 class BGEEmbeddingService:
     def __init__(self, model_path: str | None = None) -> None:
-        self.model_path = model_path or get_settings().EMBEDDING_MODEL_PATH
+        settings = get_settings()
+        self.model_path = model_path or settings.EMBEDDING_MODEL_PATH
+        self.batch_size = settings.EMBEDDING_BATCH_SIZE
         self._model: Any = None
         self._load_lock = Lock()
         self._inference_lock = Lock()
@@ -58,6 +60,7 @@ class BGEEmbeddingService:
         with self._inference_lock:
             embeddings = model.encode(
                 texts,
+                batch_size=self.batch_size,
                 normalize_embeddings=True,
                 convert_to_numpy=True,
                 show_progress_bar=False,
