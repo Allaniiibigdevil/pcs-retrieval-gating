@@ -29,10 +29,13 @@ class Settings(BaseSettings):
     LOCAL_ES_TIMEOUT_SECONDS: int = Field(default=10, ge=1)
     LOCAL_ES_SUMMARY_BOOST: float = Field(default=1.0, gt=0.0)
     LOCAL_ES_KEYWORDS_BOOST: float = Field(default=1.0, gt=0.0)
+    LOCAL_ES_BULK_BATCH_SIZE: int = Field(default=1000, ge=1, le=100000)
 
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = Field(default=512, ge=1)
+    EMBEDDING_BATCH_SIZE: int = Field(default=64, ge=1, le=1024)
+    INDEX_BUILD_EMBEDDING_CHUNK_SIZE: int = Field(default=512, ge=1, le=100000)
 
     RERANKER_MODEL_PATH: str = "Alibaba-NLP/gte-multilingual-reranker-base"
     RERANKER_LOCAL_FILES_ONLY: bool = True
