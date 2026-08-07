@@ -10,10 +10,11 @@ from app.schemas.doc import SourceDoc
 class FakeModel:
     def __init__(self) -> None:
         self.thread_id: int | None = None
+        self.kwargs: dict = {}
 
     def encode(self, texts, **kwargs):
-        del kwargs
         self.thread_id = threading.get_ident()
+        self.kwargs = dict(kwargs)
         return np.ones((len(texts), 2), dtype="float32")
 
 
@@ -29,6 +30,18 @@ async def test_bge_encode_runs_in_a_worker_thread() -> None:
     assert fake_model.thread_id is not None
     assert fake_model.thread_id != event_loop_thread
     assert vectors == [[1.0, 1.0], [1.0, 1.0]]
+
+
+@pytest.mark.asyncio
+async def test_bge_batch_uses_sentence_transformer_default_batching_and_progress() -> None:
+    service = BGEEmbeddingService("unused")
+    fake_model = FakeModel()
+    service._model = fake_model
+
+    await service.embed_batch(["one", "two"], show_progress=True)
+
+    assert "batch_size" not in fake_model.kwargs
+    assert fake_model.kwargs["show_progress_bar"] is True
 
 
 def test_embedding_text_contains_content_but_not_source_identity() -> None:
