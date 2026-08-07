@@ -1,6 +1,5 @@
 import json
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -25,22 +24,21 @@ class LocalArtifactStore:
             for doc in docs:
                 file.write(doc.model_dump_json() + "\n")
 
-    def iter_docs(self) -> Iterator[SourceDoc]:
+    def load_docs(self) -> list[SourceDoc]:
         if not self.docs_path.exists():
             raise FileNotFoundError(f"Missing local docs artifact: {self.docs_path}")
 
+        docs: list[SourceDoc] = []
         with self.docs_path.open("r", encoding="utf-8") as file:
             for line_no, line in enumerate(file, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    yield SourceDoc.model_validate_json(line)
+                    docs.append(SourceDoc.model_validate_json(line))
                 except Exception as exc:
                     raise ValueError(f"Invalid docs artifact at {self.docs_path}:{line_no}") from exc
-
-    def load_docs(self) -> list[SourceDoc]:
-        return list(self.iter_docs())
+        return docs
 
     def save_faiss(
         self,
