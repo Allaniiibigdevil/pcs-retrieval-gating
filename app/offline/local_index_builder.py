@@ -12,7 +12,7 @@ from app.embedding.embedding_service import (
 )
 from app.offline.local_es_indexer import LocalElasticsearchIndexer
 from app.schemas.doc import SourceDoc
-from app.source_registry import SourceConfig, SourceRegistry
+from app.source_registry import SourceConfig
 from app.storage.local_artifact_store import LocalArtifactStore
 
 
