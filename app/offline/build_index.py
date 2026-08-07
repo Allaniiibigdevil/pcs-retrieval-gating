@@ -32,9 +32,9 @@ async def run() -> None:
     args = parser.parse_args()
 
     docs = (
-        load_docs_from_json_or_jsonl(args.docs)
+        load_docs_from_json_or_jsonl(args.docs, show_progress=True)
         if args.docs
-        else LocalDocStore().load_all()
+        else LocalDocStore().load_all(show_progress=True)
     )
     source_registry = SourceRegistry.from_path(
         args.source_config or settings.LOCAL_SOURCE_CONFIG_PATH
@@ -43,6 +43,7 @@ async def run() -> None:
         artifact_store=LocalArtifactStore(artifact_dir=args.artifact_dir),
         index_elasticsearch=args.index_es,
         source_registry=source_registry,
+        show_progress=True,
     ).build(docs)
     print(
         "built_local_indexes "
