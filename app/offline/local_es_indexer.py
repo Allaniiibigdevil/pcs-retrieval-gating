@@ -3,6 +3,7 @@ from urllib import error, request
 
 from app.config import get_settings
 from app.schemas.doc import SourceDoc
+from app.utils.progress import render_progress
 
 
 class ElasticsearchRequestError(RuntimeError):
@@ -18,19 +19,28 @@ class ElasticsearchRequestError(RuntimeError):
 
 
 class LocalElasticsearchIndexer:
-    def __init__(self, index_name: str, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        index_name: str,
+        base_url: str | None = None,
+        *,
+        show_progress: bool = False,
+    ) -> None:
         if not index_name.strip():
             raise ValueError("index_name must not be blank")
         settings = get_settings()
         self.settings = settings
         self.base_url = (base_url or settings.LOCAL_ES_URL).rstrip("/")
         self.index_name = index_name
+        self.show_progress = show_progress
 
     def rebuild(self, docs: list[SourceDoc]) -> None:
         self._delete_index_if_exists()
         self._request("PUT", f"/{self.index_name}", self._mapping())
         if docs:
             self._bulk_index(docs)
+        elif self.show_progress:
+            render_progress("ES indexing", 0, 0, detail=self.index_name)
         self._request("POST", f"/{self.index_name}/_refresh")
 
     def _mapping(self) -> dict:
@@ -57,19 +67,40 @@ class LocalElasticsearchIndexer:
         }
 
     def _bulk_index(self, docs: list[SourceDoc]) -> None:
-        lines: list[str] = []
-        for doc in docs:
-            lines.append(json.dumps({"index": {"_index": self.index_name, "_id": doc.doc_id}}))
-            lines.append(json.dumps(self._source(doc), ensure_ascii=False))
-        body = "\n".join(lines) + "\n"
-        response = self._request_raw("POST", "/_bulk", body, content_type="application/x-ndjson")
-        if response.get("errors"):
-            failed_items = [
-                item
-                for item in response.get("items", [])
-                if item.get("index", {}).get("error") is not None
-            ]
-            raise RuntimeError(f"Elasticsearch bulk indexing failed: {failed_items[:3]}")
+        total = len(docs)
+        batch_size = self.settings.LOCAL_ES_BULK_BATCH_SIZE
+        for start in range(0, total, batch_size):
+            batch = docs[start : start + batch_size]
+            lines: list[str] = []
+            for doc in batch:
+                lines.append(
+                    json.dumps({"index": {"_index": self.index_name, "_id": doc.doc_id}})
+                )
+                lines.append(json.dumps(self._source(doc), ensure_ascii=False))
+            body = "\n".join(lines) + "\n"
+            response = self._request_raw(
+                "POST",
+                "/_bulk",
+                body,
+                content_type="application/x-ndjson",
+            )
+            if response.get("errors"):
+                failed_items = [
+                    item
+                    for item in response.get("items", [])
+                    if item.get("index", {}).get("error") is not None
+                ]
+                raise RuntimeError(
+                    "Elasticsearch bulk indexing failed "
+                    f"for docs {start}:{start + len(batch)}: {failed_items[:3]}"
+                )
+            if self.show_progress:
+                render_progress(
+                    "ES indexing",
+                    start + len(batch),
+                    total,
+                    detail=self.index_name,
+                )
 
     def _source(self, doc: SourceDoc) -> dict:
         return {
