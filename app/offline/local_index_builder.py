@@ -55,9 +55,27 @@ class LocalIndexBuilder:
             raise ValueError("Document doc_id values must be globally unique")
         self.source_registry.validate_source_ids({doc.system_id for doc in docs})
 
+        embedding_texts = [build_embedding_text(doc) for doc in docs]
+        embeddings = await self.embedding_service.embed_batch(
+            embedding_texts,
+            show_progress=self.show_progress,
+        )
+        embedding_matrix = np.asarray(embeddings, dtype="float32")
+        if embedding_matrix.ndim != 2:
+            raise ValueError("Embedding service must return a 2D matrix")
+        if embedding_matrix.shape[0] != len(docs):
+            raise ValueError("Embedding service returned a different number of vectors than docs")
+        if embedding_matrix.shape[1] <= 0:
+            raise ValueError("Embedding vectors must have a positive dimension")
+        embedding_dim = int(embedding_matrix.shape[1])
+        if self.show_progress:
+            render_progress("Embedding docs", len(docs), len(docs), detail="single pass")
+
         docs_by_source: dict[str, list[SourceDoc]] = defaultdict(list)
-        for doc in docs:
+        positions_by_source: dict[str, list[int]] = defaultdict(list)
+        for position, doc in enumerate(docs):
             docs_by_source[doc.system_id].append(doc)
+            positions_by_source[doc.system_id].append(position)
 
         self.artifact_store.save_docs(docs)
         if self.show_progress:
@@ -66,35 +84,16 @@ class LocalIndexBuilder:
         logging.getLogger("faiss.loader").setLevel(logging.WARNING)
         import faiss
 
-        embedding_dim: int | None = None
-        embedded_docs = 0
-        faiss_done = 0
         faiss_indices: dict[str, str] = {}
-        empty_sources = []
-
-        for source in self.source_registry.sources:
+        for source_number, source in enumerate(self.source_registry.sources, start=1):
             source_docs = docs_by_source.get(source.source_id, [])
-            if not source_docs:
-                empty_sources.append(source)
-                continue
-
-            embedding_matrix = await self._embed_source_docs(
-                source_docs,
-                source_id=source.source_id,
-                completed_before=embedded_docs,
-                total_docs=len(docs),
-            )
-            current_dim = int(embedding_matrix.shape[1])
-            if embedding_dim is None:
-                embedding_dim = current_dim
-            elif current_dim != embedding_dim:
-                raise ValueError(
-                    "Embedding dimension changed between sources: "
-                    f"expected {embedding_dim}, got {current_dim} for {source.source_id!r}"
-                )
-
-            index = faiss.IndexFlatIP(current_dim)
-            index.add(embedding_matrix)
+            source_positions = positions_by_source.get(source.source_id, [])
+            index = faiss.IndexFlatIP(embedding_dim)
+            if source_positions:
+                source_vectors = embedding_matrix[
+                    np.asarray(source_positions, dtype="int64")
+                ]
+                index.add(source_vectors)
             self.artifact_store.save_faiss(
                 index,
                 [doc.doc_id for doc in source_docs],
@@ -102,33 +101,10 @@ class LocalIndexBuilder:
                 doc_ids_path=source.faiss_doc_ids_path,
             )
             faiss_indices[source.source_id] = source.faiss_index_path
-            embedded_docs += len(source_docs)
-            faiss_done += 1
             if self.show_progress:
                 render_progress(
                     "FAISS indexes",
-                    faiss_done,
-                    len(self.source_registry.sources),
-                    detail=source.source_id,
-                )
-
-        if embedding_dim is None:
-            raise ValueError("No configured source contained documents to embed")
-
-        for source in empty_sources:
-            index = faiss.IndexFlatIP(embedding_dim)
-            self.artifact_store.save_faiss(
-                index,
-                [],
-                index_path=source.faiss_index_path,
-                doc_ids_path=source.faiss_doc_ids_path,
-            )
-            faiss_indices[source.source_id] = source.faiss_index_path
-            faiss_done += 1
-            if self.show_progress:
-                render_progress(
-                    "FAISS indexes",
-                    faiss_done,
+                    source_number,
                     len(self.source_registry.sources),
                     detail=source.source_id,
                 )
@@ -171,8 +147,7 @@ class LocalIndexBuilder:
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": embedding_dim,
-                "embedding_batch_size": self.settings.EMBEDDING_BATCH_SIZE,
-                "embedding_build_chunk_size": self.settings.INDEX_BUILD_EMBEDDING_CHUNK_SIZE,
+                "embedding_build_mode": "single_pass_then_split_by_source",
                 "faiss_index_type": "IndexFlatIP",
                 "elasticsearch_bulk_batch_size": self.settings.LOCAL_ES_BULK_BATCH_SIZE,
             }
@@ -186,53 +161,3 @@ class LocalIndexBuilder:
             faiss_indices=faiss_indices,
             elasticsearch_indices=elasticsearch_indices,
         )
-
-    async def _embed_source_docs(
-        self,
-        docs: list[SourceDoc],
-        *,
-        source_id: str,
-        completed_before: int,
-        total_docs: int,
-    ) -> np.ndarray:
-        chunk_size = self.settings.INDEX_BUILD_EMBEDDING_CHUNK_SIZE
-        matrix: np.ndarray | None = None
-        expected_dim: int | None = None
-
-        for start in range(0, len(docs), chunk_size):
-            batch_docs = docs[start : start + chunk_size]
-            embedding_texts = [build_embedding_text(doc) for doc in batch_docs]
-            embeddings = await self.embedding_service.embed_batch(embedding_texts)
-            batch_matrix = np.asarray(embeddings, dtype="float32")
-            if batch_matrix.ndim != 2:
-                raise ValueError("Embedding service must return a 2D matrix")
-            if batch_matrix.shape[0] != len(batch_docs):
-                raise ValueError(
-                    "Embedding service returned a different number of vectors than docs"
-                )
-            if batch_matrix.shape[1] <= 0:
-                raise ValueError("Embedding vectors must have a positive dimension")
-
-            current_dim = int(batch_matrix.shape[1])
-            if matrix is None:
-                expected_dim = current_dim
-                matrix = np.empty((len(docs), current_dim), dtype="float32")
-            elif current_dim != expected_dim:
-                raise ValueError(
-                    "Embedding dimension changed between batches: "
-                    f"expected {expected_dim}, got {current_dim}"
-                )
-
-            end = start + len(batch_docs)
-            matrix[start:end] = batch_matrix
-            if self.show_progress:
-                render_progress(
-                    "Embedding docs",
-                    completed_before + end,
-                    total_docs,
-                    detail=f"source={source_id}",
-                )
-
-        if matrix is None:
-            raise ValueError("Cannot embed an empty source")
-        return matrix
