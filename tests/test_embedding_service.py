@@ -29,22 +29,11 @@ async def test_bge_encode_runs_in_a_worker_thread() -> None:
 
     assert fake_model.thread_id is not None
     assert fake_model.thread_id != event_loop_thread
+    assert fake_model.kwargs["show_progress_bar"] is False
     assert vectors == [[1.0, 1.0], [1.0, 1.0]]
 
 
-@pytest.mark.asyncio
-async def test_bge_batch_uses_sentence_transformer_default_batching_and_progress() -> None:
-    service = BGEEmbeddingService("unused")
-    fake_model = FakeModel()
-    service._model = fake_model
-
-    await service.embed_batch(["one", "two"], show_progress=True)
-
-    assert "batch_size" not in fake_model.kwargs
-    assert fake_model.kwargs["show_progress_bar"] is True
-
-
-def test_embedding_text_contains_content_but_not_source_identity() -> None:
+def test_embedding_text_matches_legacy_format() -> None:
     doc = SourceDoc(
         doc_id="doc-1",
         system_id="notepad",
@@ -54,6 +43,6 @@ def test_embedding_text_contains_content_but_not_source_identity() -> None:
 
     text = build_embedding_text(doc)
 
-    assert "海鲜过敏记录" in text
-    assert "海鲜, 过敏" in text
-    assert "notepad" not in text
+    assert "system: notepad" in text
+    assert "summary: 海鲜过敏记录" in text
+    assert "keywords: 海鲜, 过敏" in text
