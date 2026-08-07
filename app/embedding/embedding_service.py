@@ -2,9 +2,7 @@ import asyncio
 import hashlib
 import math
 import random
-from functools import lru_cache
-from threading import Lock
-from typing import Any, Protocol
+from typing import Protocol
 
 from app.config import get_settings
 from app.schemas.doc import SourceDoc
@@ -14,31 +12,18 @@ class EmbeddingService(Protocol):
     async def embed(self, text: str) -> list[float]:
         ...
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        show_progress: bool = False,
-    ) -> list[list[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         ...
 
 
 class MockEmbeddingService:
     def __init__(self, dim: int | None = None) -> None:
-        self.dim = get_settings().EMBEDDING_DIM if dim is None else dim
-        if self.dim <= 0:
-            raise ValueError("Embedding dimension must be greater than 0")
+        self.dim = dim or get_settings().EMBEDDING_DIM
 
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        show_progress: bool = False,
-    ) -> list[list[float]]:
-        del show_progress
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]
 
     def _embed_one(self, text: str) -> list[float]:
@@ -53,51 +38,35 @@ class BGEEmbeddingService:
     def __init__(self, model_path: str | None = None) -> None:
         settings = get_settings()
         self.model_path = model_path or settings.EMBEDDING_MODEL_PATH
-        self._model: Any = None
-        self._load_lock = Lock()
-        self._inference_lock = Lock()
+        self._model = None
+
+    @property
+    def model(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self.model_path)
+        return self._model
 
     async def embed(self, text: str) -> list[float]:
         return (await self.embed_batch([text]))[0]
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        show_progress: bool = False,
-    ) -> list[list[float]]:
-        if not texts:
-            return []
-        return await asyncio.to_thread(self._encode, texts, show_progress)
-
-    def _encode(self, texts: list[str], show_progress: bool = False) -> list[list[float]]:
-        model = self._ensure_model()
-        with self._inference_lock:
-            embeddings = model.encode(
-                texts,
-                normalize_embeddings=True,
-                convert_to_numpy=True,
-                show_progress_bar=show_progress,
-            )
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        embeddings = await asyncio.to_thread(
+            self.model.encode,
+            texts,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
         return embeddings.astype("float32").tolist()
-
-    def _ensure_model(self) -> Any:
-        if self._model is not None:
-            return self._model
-        with self._load_lock:
-            if self._model is None:
-                from sentence_transformers import SentenceTransformer
-
-                self._model = SentenceTransformer(self.model_path)
-        return self._model
 
 
 def build_embedding_text(doc: SourceDoc) -> str:
     keywords = ", ".join(doc.keywords)
-    return f"summary: {doc.summary}\nkeywords: {keywords}"
+    return f"system: {doc.system_id}\nsummary: {doc.summary}\nkeywords: {keywords}"
 
 
-@lru_cache
 def get_embedding_service() -> EmbeddingService:
     settings = get_settings()
     if settings.EMBEDDING_PROVIDER == "mock":
