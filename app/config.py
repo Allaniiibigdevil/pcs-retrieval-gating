@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = Field(default=512, ge=1)
     EMBEDDING_BATCH_SIZE: int = Field(default=16, ge=1, le=1024)
-    INDEX_BUILD_EMBEDDING_CHUNK_SIZE: int = Field(default=128, ge=1, le=100000)
+    INDEX_BUILD_EMBEDDING_CHUNK_SIZE: int = Field(default=32, ge=1, le=100000)
 
     REWRITTEN_QUERY_ES_WEIGHT: float = Field(default=1.0, ge=0.0, le=1.0)
 
