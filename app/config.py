@@ -34,8 +34,6 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
     EMBEDDING_DIM: int = Field(default=512, ge=1)
-    EMBEDDING_BATCH_SIZE: int = Field(default=16, ge=1, le=1024)
-    INDEX_BUILD_EMBEDDING_CHUNK_SIZE: int = Field(default=32, ge=1, le=100000)
 
     RERANKER_MODEL_PATH: str = "Alibaba-NLP/gte-multilingual-reranker-base"
     RERANKER_LOCAL_FILES_ONLY: bool = True
