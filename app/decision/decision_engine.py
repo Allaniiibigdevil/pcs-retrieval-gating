@@ -7,13 +7,13 @@ from app.decision.query_normalizer import QueryNormalizer
 from app.decision.query_rewriter import prepare_queries, rewrite_queries
 from app.decision.system_aggregator import SystemAggregator
 from app.retrieval.candidate_merger import CandidateMerger
+from app.retrieval.candidate_selector import AdaptiveCandidateSelector
 from app.retrieval.factory import Retriever, build_keyword_retriever, build_vector_retriever
 from app.retrieval.parallel_query_retriever import (
     ChannelSearchResult,
     ParallelQuerySearchResult,
     search_queries_in_parallel,
 )
-from app.retrieval.vector_candidate_selector import AdaptiveVectorCandidateSelector
 from app.schemas.decision import DecideResponse, SystemDecision
 from app.source_registry import SourceConfig, SourceRegistry, get_source_registry
 from app.utils.timing import StageTimer
@@ -95,17 +95,18 @@ class DecisionEngine:
             total_keyword_hits += len(keyword_hits)
             total_vector_hits += len(raw_vector_hits)
 
-            vector_selection = AdaptiveVectorCandidateSelector(
-                preferred_threshold=source.faiss_preferred_score_threshold,
-                min_threshold=source.faiss_min_score_threshold,
-                target_hits=source.faiss_target_hits,
-            ).select(raw_vector_hits)
-            vector_hits = vector_selection.vector_candidates
-            effective_thresholds[source.source_id] = vector_selection.effective_threshold
-            total_vector_candidates += len(vector_hits)
-
-            candidates = self.merger.merge(source.source_id, keyword_hits, vector_hits)
+            selection = AdaptiveCandidateSelector(
+                source_id=source.source_id,
+                preferred_vector_threshold=source.faiss_preferred_score_threshold,
+                min_vector_threshold=source.faiss_min_score_threshold,
+                target_vector_hits=source.faiss_target_hits,
+                merger=self.merger,
+            ).select(keyword_hits, raw_vector_hits)
+            effective_thresholds[source.source_id] = selection.effective_vector_threshold
+            total_vector_candidates += len(selection.vector_candidates)
+            candidates = selection.candidates
             total_candidates += len(candidates)
+
             evidence_docs = self.evidence_builder.build(task, candidates)
             decision = SystemAggregator(
                 source_id=source.source_id,
