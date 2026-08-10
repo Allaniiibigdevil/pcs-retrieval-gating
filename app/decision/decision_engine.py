@@ -13,6 +13,7 @@ from app.retrieval.parallel_query_retriever import (
     ParallelQuerySearchResult,
     search_queries_in_parallel,
 )
+from app.retrieval.vector_candidate_selector import AdaptiveVectorCandidateSelector
 from app.schemas.decision import DecideResponse, SystemDecision
 from app.source_registry import SourceConfig, SourceRegistry, get_source_registry
 from app.utils.timing import StageTimer
@@ -62,7 +63,9 @@ class DecisionEngine:
         successful_sources = 0
         total_keyword_hits = 0
         total_vector_hits = 0
+        total_vector_candidates = 0
         total_candidates = 0
+        effective_thresholds: dict[str, float | None] = {}
         last_error: Exception | None = None
 
         for source, raw_result in zip(sources, raw_results):
@@ -88,9 +91,19 @@ class DecisionEngine:
 
             successful_sources += 1
             keyword_hits = raw_result.keyword.hits
-            vector_hits = raw_result.vector.hits
+            raw_vector_hits = raw_result.vector.hits
             total_keyword_hits += len(keyword_hits)
-            total_vector_hits += len(vector_hits)
+            total_vector_hits += len(raw_vector_hits)
+
+            vector_selection = AdaptiveVectorCandidateSelector(
+                preferred_threshold=source.faiss_preferred_score_threshold,
+                min_threshold=source.faiss_min_score_threshold,
+                target_hits=source.faiss_target_hits,
+            ).select(raw_vector_hits)
+            vector_hits = vector_selection.vector_candidates
+            effective_thresholds[source.source_id] = vector_selection.effective_threshold
+            total_vector_candidates += len(vector_hits)
+
             candidates = self.merger.merge(source.source_id, keyword_hits, vector_hits)
             total_candidates += len(candidates)
             evidence_docs = self.evidence_builder.build(task, candidates)
@@ -114,12 +127,15 @@ class DecisionEngine:
         response = _response(task_id, task, queries, decisions, timer)
         logger.info(
             "decision_completed task_id=%s source_count=%d query_count=%d keyword_hits=%d "
-            "vector_hits=%d merged_candidates=%d selected_systems=%s latency_ms=%s",
+            "vector_hits=%d vector_candidates=%d effective_vector_thresholds=%s "
+            "merged_candidates=%d selected_systems=%s latency_ms=%s",
             task_id,
             len(sources),
             len(queries),
             total_keyword_hits,
             total_vector_hits,
+            total_vector_candidates,
+            effective_thresholds,
             total_candidates,
             response.selected_systems,
             response.latency_ms,
