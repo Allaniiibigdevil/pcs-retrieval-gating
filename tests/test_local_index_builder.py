@@ -17,14 +17,9 @@ class CountingEmbeddingService(MockEmbeddingService):
         super().__init__(dim=dim)
         self.calls: list[list[str]] = []
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        show_progress: bool = False,
-    ) -> list[list[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         self.calls.append(list(texts))
-        return await super().embed_batch(texts, show_progress=show_progress)
+        return await super().embed_batch(texts)
 
 
 def _memo_doc() -> SourceDoc:
@@ -44,6 +39,9 @@ def _source(index: str, source_id: str, root) -> dict:
         "es_top_k": 10,
         "faiss_top_k": 10,
         "evidence_docs_per_system": 2,
+        "faiss_preferred_score_threshold": 0.60,
+        "faiss_min_score_threshold": 0.30,
+        "faiss_target_hits": 10,
         "selection_threshold": 0.6,
         "es_score_weight": 0.55,
         "agreement_weight": 0.2,
