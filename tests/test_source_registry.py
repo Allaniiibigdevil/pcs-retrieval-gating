@@ -14,6 +14,9 @@ def _source(index: str, slug: str) -> dict:
         "es_top_k": 50,
         "faiss_top_k": 40,
         "evidence_docs_per_system": 3,
+        "faiss_preferred_score_threshold": 0.60,
+        "faiss_min_score_threshold": 0.30,
+        "faiss_target_hits": 10,
         "selection_threshold": 0.60,
         "es_score_weight": 0.55,
         "agreement_weight": 0.20,
@@ -28,7 +31,11 @@ def test_source_registry_loads_self_contained_source_settings(tmp_path) -> None:
         json.dumps(
             {
                 "sources": {
-                    "photo": {**_source("pcs-photo", "photo"), "faiss_top_k": 75},
+                    "photo": {
+                        **_source("pcs-photo", "photo"),
+                        "faiss_top_k": 75,
+                        "faiss_preferred_score_threshold": 0.55,
+                    },
                     "notepad": _source("pcs-notepad", "notepad"),
                 }
             }
@@ -41,6 +48,7 @@ def test_source_registry_loads_self_contained_source_settings(tmp_path) -> None:
     assert registry.config_path == path
     assert [source.source_id for source in registry.enabled_sources] == ["photo", "notepad"]
     assert registry.require("photo").faiss_top_k == 75
+    assert registry.require("photo").faiss_preferred_score_threshold == 0.55
     assert registry.require("notepad").selection_threshold == 0.60
     assert registry.require("photo").faiss_index_path.endswith("photo/faiss.index")
 
@@ -53,6 +61,17 @@ def test_source_registry_rejects_missing_strategy_settings(tmp_path) -> None:
     )
 
     with pytest.raises(ValidationError):
+        SourceRegistry.from_path(path)
+
+
+def test_source_registry_rejects_invalid_vector_thresholds(tmp_path) -> None:
+    path = tmp_path / "sources.json"
+    source = _source("pcs-photo", "photo")
+    source["faiss_min_score_threshold"] = 0.70
+    source["faiss_preferred_score_threshold"] = 0.60
+    path.write_text(json.dumps({"sources": {"photo": source}}), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="faiss_min_score_threshold"):
         SourceRegistry.from_path(path)
 
 
