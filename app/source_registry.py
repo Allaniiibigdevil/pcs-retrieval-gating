@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
 from app.utils.paths import resolve_project_path
@@ -19,11 +19,25 @@ class SourceConfig(BaseModel):
     es_top_k: int = Field(ge=1, le=1000)
     faiss_top_k: int = Field(ge=1, le=1000)
     evidence_docs_per_system: int = Field(ge=1, le=100)
+    faiss_preferred_score_threshold: float = Field(default=0.60, ge=-1.0, le=1.0)
+    faiss_min_score_threshold: float = Field(default=0.30, ge=-1.0, le=1.0)
+    faiss_target_hits: int = Field(default=10, ge=1, le=1000)
     selection_threshold: float = Field(ge=0.0, le=1.0)
     es_score_weight: float = Field(ge=0.0, le=1.0)
     agreement_weight: float = Field(ge=0.0, le=1.0)
     semantic_match_threshold: float = Field(ge=0.0, le=1.0)
     lexical_match_threshold: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_vector_thresholds(self) -> "SourceConfig":
+        if self.faiss_min_score_threshold > self.faiss_preferred_score_threshold:
+            raise ValueError(
+                "faiss_min_score_threshold must not exceed "
+                "faiss_preferred_score_threshold"
+            )
+        if self.faiss_target_hits > self.faiss_top_k:
+            raise ValueError("faiss_target_hits must not exceed faiss_top_k")
+        return self
 
 
 class SourceRegistry:
