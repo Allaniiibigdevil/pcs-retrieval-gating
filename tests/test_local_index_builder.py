@@ -17,14 +17,9 @@ class CountingEmbeddingService(MockEmbeddingService):
         super().__init__(dim=dim)
         self.calls: list[list[str]] = []
 
-    async def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        show_progress: bool = False,
-    ) -> list[list[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         self.calls.append(list(texts))
-        return await super().embed_batch(texts, show_progress=show_progress)
+        return await super().embed_batch(texts)
 
 
 def _memo_doc() -> SourceDoc:
