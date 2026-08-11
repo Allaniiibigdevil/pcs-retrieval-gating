@@ -57,10 +57,6 @@ class LocalElasticsearchVectorIndexer:
                 "properties": {
                     "doc_id": {"type": "keyword"},
                     "system_id": {"type": "keyword"},
-                    "summary": {"type": "text", "index": False},
-                    "keywords": {"type": "keyword"},
-                    "metadata": {"enabled": False},
-                    "updated_at": {"type": "date"},
                     "embedding": {
                         "type": "dense_vector",
                         "dims": embedding_dim,
@@ -85,10 +81,6 @@ class LocalElasticsearchVectorIndexer:
                         {
                             "doc_id": doc.doc_id,
                             "system_id": doc.system_id,
-                            "summary": doc.summary,
-                            "keywords": doc.keywords,
-                            "metadata": doc.metadata,
-                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                             "embedding": vector.tolist(),
                         },
                         ensure_ascii=False,
