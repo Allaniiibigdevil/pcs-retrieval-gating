@@ -10,7 +10,7 @@ from app.storage.local_doc_store import load_docs_from_json_or_jsonl
 async def run() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(
-        description="Build all source documents into one Elasticsearch vector index."
+        description="Build one unified keyword ES index and one unified vector ES index."
     )
     parser.add_argument(
         "--docs",
@@ -22,11 +22,6 @@ async def run() -> None:
         default=None,
         help="Source registry JSON path. Defaults to LOCAL_SOURCE_CONFIG_PATH.",
     )
-    parser.add_argument(
-        "--index-es",
-        action="store_true",
-        help="Also rebuild each source's existing Elasticsearch keyword index.",
-    )
     args = parser.parse_args()
 
     docs = load_docs_from_json_or_jsonl(args.docs)
@@ -36,15 +31,13 @@ async def run() -> None:
     registry = SourceRegistry.from_path(
         args.source_config or settings.LOCAL_SOURCE_CONFIG_PATH
     )
-    result = await LocalIndexBuilder(
-        source_registry=registry,
-        index_elasticsearch=args.index_es,
-    ).build(docs)
+    result = await LocalIndexBuilder(source_registry=registry).build(docs)
     print(
         "built_local_index "
         f"doc_count={result.doc_count} "
         f"source_count={result.source_count} "
         f"embedding_dim={result.embedding_dim} "
+        f"keyword_index={result.keyword_index} "
         f"vector_index={result.vector_index}"
     )
 
