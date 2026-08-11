@@ -73,8 +73,9 @@ class LocalElasticsearchIndexer:
             batch = docs[start : start + batch_size]
             lines: list[str] = []
             for doc in batch:
+                es_id = f"{doc.system_id}:{doc.doc_id}"
                 lines.append(
-                    json.dumps({"index": {"_index": self.index_name, "_id": doc.doc_id}})
+                    json.dumps({"index": {"_index": self.index_name, "_id": es_id}})
                 )
                 lines.append(json.dumps(self._source(doc), ensure_ascii=False))
             body = "\n".join(lines) + "\n"
