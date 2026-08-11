@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-import logging
 
 import numpy as np
 
@@ -11,8 +10,9 @@ from app.embedding.embedding_service import (
     get_embedding_service,
 )
 from app.offline.local_es_indexer import LocalElasticsearchIndexer
+from app.offline.local_es_vector_indexer import LocalElasticsearchVectorIndexer
 from app.schemas.doc import SourceDoc
-from app.source_registry import SourceConfig
+from app.source_registry import SourceRegistry, get_source_registry
 from app.storage.local_artifact_store import LocalArtifactStore
 
 
@@ -22,90 +22,79 @@ class BuildIndexResult:
     artifact_dir: str
     embedding_model: str
     embedding_dim: int
-    source_count: int = 1
+    source_count: int
+    vector_index: str
     faiss_indices: dict[str, str] = field(default_factory=dict)
     elasticsearch_indices: dict[str, str] = field(default_factory=dict)
 
 
 class LocalIndexBuilder:
-    """Build exactly one source using the original single-index build path."""
+    """Build all source documents into one unified Elasticsearch vector index."""
 
     def __init__(
         self,
         *,
-        source: SourceConfig,
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
+        source_registry: SourceRegistry | None = None,
         index_elasticsearch: bool = False,
     ) -> None:
         self.settings = get_settings()
-        self.source = source
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service or get_embedding_service()
+        self.source_registry = source_registry or get_source_registry()
         self.index_elasticsearch = index_elasticsearch
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
         if not docs:
             raise ValueError("Cannot build local index from an empty document set")
 
-        wrong_sources = sorted({doc.system_id for doc in docs if doc.system_id != self.source.source_id})
-        if wrong_sources:
-            raise ValueError(
-                f"Single-source build for {self.source.source_id!r} received documents from: "
-                + ", ".join(wrong_sources)
-            )
+        source_ids = {doc.system_id for doc in docs}
+        self.source_registry.validate_source_ids(source_ids)
 
-        # Keep this path intentionally equivalent to the pre-multi-source builder:
-        # build all texts -> one embed_batch call -> one matrix -> one FAISS index.
+        # Keep the proven pre-multi-source embedding path unchanged:
+        # build all texts -> one embed_batch call -> one float32 matrix.
         embedding_texts = [build_embedding_text(doc) for doc in docs]
         embeddings = await self.embedding_service.embed_batch(embedding_texts)
         embedding_matrix = np.asarray(embeddings, dtype="float32")
         if len(embedding_matrix.shape) != 2:
             raise ValueError("Embedding service must return a 2D matrix")
+        if int(embedding_matrix.shape[0]) != len(docs):
+            raise ValueError("Embedding service returned the wrong number of vectors")
 
-        logging.getLogger("faiss.loader").setLevel(logging.WARNING)
-        import faiss
+        LocalElasticsearchVectorIndexer().rebuild(docs, embedding_matrix)
 
-        index = faiss.IndexFlatIP(embedding_matrix.shape[1])
-        index.add(embedding_matrix)
-
-        doc_ids = [doc.doc_id for doc in docs]
+        # Keep a mixed document artifact for build inspection. Vector retrieval will use ES.
         self.artifact_store.save_docs(docs)
-        self.artifact_store.save_faiss(
-            index,
-            doc_ids,
-            index_path=self.source.faiss_index_path,
-            doc_ids_path=self.source.faiss_doc_ids_path,
-        )
 
         elasticsearch_indices: dict[str, str] = {}
         if self.index_elasticsearch:
-            LocalElasticsearchIndexer(index_name=self.source.es_index).rebuild(docs)
-            elasticsearch_indices[self.source.source_id] = self.source.es_index
+            docs_by_source: dict[str, list[SourceDoc]] = {}
+            for doc in docs:
+                docs_by_source.setdefault(doc.system_id, []).append(doc)
+
+            for source in self.source_registry.sources:
+                source_docs = docs_by_source.get(source.source_id)
+                if not source_docs:
+                    continue
+                LocalElasticsearchIndexer(index_name=source.es_index).rebuild(source_docs)
+                elasticsearch_indices[source.source_id] = source.es_index
 
         self.artifact_store.save_manifest(
             {
-                "version": 3,
+                "version": 4,
                 "built_at": datetime.now(UTC).isoformat(),
                 "doc_count": len(docs),
-                "source_count": 1,
-                "sources": {
-                    self.source.source_id: {
-                        "doc_count": len(docs),
-                        "elasticsearch_index": self.source.es_index,
-                        "faiss_index_path": self.source.faiss_index_path,
-                        "faiss_doc_ids_path": self.source.faiss_doc_ids_path,
-                    }
-                },
+                "source_count": len(source_ids),
+                "vector_index": self.settings.LOCAL_ES_VECTOR_INDEX,
+                "vector_retriever": "local_es_dense_vector",
                 "keyword_retriever": "local_es_per_source",
-                "vector_retriever": "local_faiss_per_source",
-                "elasticsearch_indexed": self.index_elasticsearch,
+                "elasticsearch_keyword_indexed": self.index_elasticsearch,
                 "elasticsearch_url": self.settings.LOCAL_ES_URL,
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
                 "embedding_dim": int(embedding_matrix.shape[1]),
-                "embedding_build_mode": "legacy_single_source",
-                "faiss_index_type": "IndexFlatIP",
+                "embedding_build_mode": "legacy_single_pass_all_sources",
             }
         )
         return BuildIndexResult(
@@ -113,6 +102,7 @@ class LocalIndexBuilder:
             artifact_dir=str(self.artifact_store.artifact_dir),
             embedding_model=self.settings.EMBEDDING_MODEL_PATH,
             embedding_dim=int(embedding_matrix.shape[1]),
-            faiss_indices={self.source.source_id: self.source.faiss_index_path},
+            source_count=len(source_ids),
+            vector_index=self.settings.LOCAL_ES_VECTOR_INDEX,
             elasticsearch_indices=elasticsearch_indices,
         )
