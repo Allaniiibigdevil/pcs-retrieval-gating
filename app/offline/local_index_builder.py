@@ -23,13 +23,14 @@ class BuildIndexResult:
     embedding_model: str
     embedding_dim: int
     source_count: int
+    keyword_index: str
     vector_index: str
     faiss_indices: dict[str, str] = field(default_factory=dict)
     elasticsearch_indices: dict[str, str] = field(default_factory=dict)
 
 
 class LocalIndexBuilder:
-    """Build all source documents into one unified Elasticsearch vector index."""
+    """Build one unified keyword ES index and one unified vector ES index."""
 
     def __init__(
         self,
@@ -37,13 +38,11 @@ class LocalIndexBuilder:
         artifact_store: LocalArtifactStore | None = None,
         embedding_service: EmbeddingService | None = None,
         source_registry: SourceRegistry | None = None,
-        index_elasticsearch: bool = False,
     ) -> None:
         self.settings = get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.embedding_service = embedding_service or get_embedding_service()
         self.source_registry = source_registry or get_source_registry()
-        self.index_elasticsearch = index_elasticsearch
 
     async def build(self, docs: list[SourceDoc]) -> BuildIndexResult:
         if not docs:
@@ -52,7 +51,13 @@ class LocalIndexBuilder:
         source_ids = {doc.system_id for doc in docs}
         self.source_registry.validate_source_ids(source_ids)
 
-        # Keep the proven pre-multi-source embedding path unchanged:
+        # Build the lightweight keyword index first so ES mapping/analyzer errors
+        # fail before the expensive embedding pass starts.
+        LocalElasticsearchIndexer(
+            index_name=self.settings.LOCAL_ES_KEYWORD_INDEX
+        ).rebuild(docs)
+
+        # Keep the proven embedding path unchanged:
         # build all texts -> one embed_batch call -> one float32 matrix.
         embedding_texts = [build_embedding_text(doc) for doc in docs]
         embeddings = await self.embedding_service.embed_batch(embedding_texts)
@@ -64,32 +69,18 @@ class LocalIndexBuilder:
 
         LocalElasticsearchVectorIndexer().rebuild(docs, embedding_matrix)
 
-        # Keep a mixed document artifact for build inspection. Vector retrieval will use ES.
+        # Keep a mixed document artifact for build inspection.
         self.artifact_store.save_docs(docs)
-
-        elasticsearch_indices: dict[str, str] = {}
-        if self.index_elasticsearch:
-            docs_by_source: dict[str, list[SourceDoc]] = {}
-            for doc in docs:
-                docs_by_source.setdefault(doc.system_id, []).append(doc)
-
-            for source in self.source_registry.sources:
-                source_docs = docs_by_source.get(source.source_id)
-                if not source_docs:
-                    continue
-                LocalElasticsearchIndexer(index_name=source.es_index).rebuild(source_docs)
-                elasticsearch_indices[source.source_id] = source.es_index
-
         self.artifact_store.save_manifest(
             {
-                "version": 4,
+                "version": 5,
                 "built_at": datetime.now(UTC).isoformat(),
                 "doc_count": len(docs),
                 "source_count": len(source_ids),
+                "keyword_index": self.settings.LOCAL_ES_KEYWORD_INDEX,
                 "vector_index": self.settings.LOCAL_ES_VECTOR_INDEX,
+                "keyword_retriever": "local_es_unified",
                 "vector_retriever": "local_es_dense_vector",
-                "keyword_retriever": "local_es_per_source",
-                "elasticsearch_keyword_indexed": self.index_elasticsearch,
                 "elasticsearch_url": self.settings.LOCAL_ES_URL,
                 "embedding_provider": self.settings.EMBEDDING_PROVIDER,
                 "embedding_model": self.settings.EMBEDDING_MODEL_PATH,
@@ -103,6 +94,10 @@ class LocalIndexBuilder:
             embedding_model=self.settings.EMBEDDING_MODEL_PATH,
             embedding_dim=int(embedding_matrix.shape[1]),
             source_count=len(source_ids),
+            keyword_index=self.settings.LOCAL_ES_KEYWORD_INDEX,
             vector_index=self.settings.LOCAL_ES_VECTOR_INDEX,
-            elasticsearch_indices=elasticsearch_indices,
+            elasticsearch_indices={
+                "keyword": self.settings.LOCAL_ES_KEYWORD_INDEX,
+                "vector": self.settings.LOCAL_ES_VECTOR_INDEX,
+            },
         )
