@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     LOCAL_SOURCE_CONFIG_PATH: str = "config/sources.json"
 
     LOCAL_ES_URL: str = "http://127.0.0.1:9200"
+    LOCAL_ES_VECTOR_INDEX: str = "pcs_retrieval_vectors"
     LOCAL_ES_ANALYZER: str = "standard"
     LOCAL_ES_SEARCH_ANALYZER: str = "standard"
     LOCAL_ES_SHARDS: int = Field(default=1, ge=1)
