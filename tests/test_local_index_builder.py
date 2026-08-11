@@ -67,11 +67,21 @@ def _registry(tmp_path: Path) -> SourceRegistry:
 
 
 @pytest.mark.asyncio
-async def test_builder_embeds_all_sources_once_and_builds_one_vector_index(
+async def test_builder_builds_one_keyword_and_one_vector_index_from_all_sources_once(
     monkeypatch,
     tmp_path,
 ) -> None:
+    keyword_calls: list[tuple[str, list[tuple[str, str]]]] = []
     vector_calls: list[tuple[list[tuple[str, str]], tuple[int, int]]] = []
+
+    class FakeKeywordIndexer:
+        def __init__(self, index_name: str) -> None:
+            self.index_name = index_name
+
+        def rebuild(self, docs: list[SourceDoc]) -> None:
+            keyword_calls.append(
+                (self.index_name, [(doc.system_id, doc.doc_id) for doc in docs])
+            )
 
     class FakeVectorIndexer:
         def rebuild(self, docs, embeddings) -> None:
@@ -82,6 +92,10 @@ async def test_builder_embeds_all_sources_once_and_builds_one_vector_index(
                 )
             )
 
+    monkeypatch.setattr(
+        "app.offline.local_index_builder.LocalElasticsearchIndexer",
+        FakeKeywordIndexer,
+    )
     monkeypatch.setattr(
         "app.offline.local_index_builder.LocalElasticsearchVectorIndexer",
         FakeVectorIndexer,
@@ -101,64 +115,19 @@ async def test_builder_embeds_all_sources_once_and_builds_one_vector_index(
         source_registry=_registry(tmp_path),
     ).build(docs)
 
+    expected_docs = [
+        ("memo", "memo-1"),
+        ("album", "album-1"),
+        ("photo", "photo-1"),
+    ]
+    assert keyword_calls == [("pcs_retrieval_keywords", expected_docs)]
+    assert vector_calls == [(expected_docs, (3, 16))]
     assert len(embedding.calls) == 1
     assert len(embedding.calls[0]) == 3
-    assert vector_calls == [
-        ([('memo', 'memo-1'), ('album', 'album-1'), ('photo', 'photo-1')], (3, 16))
-    ]
     assert result.doc_count == 3
     assert result.source_count == 3
     assert result.embedding_dim == 16
+    assert result.keyword_index == "pcs_retrieval_keywords"
     assert result.vector_index == "pcs_retrieval_vectors"
     assert store.docs_path.exists()
     assert store.manifest_path.exists()
-
-
-@pytest.mark.asyncio
-async def test_builder_can_rebuild_keyword_indices_per_source_without_reembedding(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    keyword_calls: list[tuple[str, list[str]]] = []
-
-    class FakeVectorIndexer:
-        def rebuild(self, docs, embeddings) -> None:
-            pass
-
-    class FakeKeywordIndexer:
-        def __init__(self, index_name: str) -> None:
-            self.index_name = index_name
-
-        def rebuild(self, docs: list[SourceDoc]) -> None:
-            keyword_calls.append((self.index_name, [doc.doc_id for doc in docs]))
-
-    monkeypatch.setattr(
-        "app.offline.local_index_builder.LocalElasticsearchVectorIndexer",
-        FakeVectorIndexer,
-    )
-    monkeypatch.setattr(
-        "app.offline.local_index_builder.LocalElasticsearchIndexer",
-        FakeKeywordIndexer,
-    )
-
-    embedding = CountingEmbeddingService(dim=8)
-    docs = [
-        _doc("memo-1", "memo"),
-        _doc("memo-2", "memo"),
-        _doc("album-1", "album"),
-        _doc("photo-1", "photo"),
-    ]
-
-    await LocalIndexBuilder(
-        artifact_store=LocalArtifactStore(artifact_dir=tmp_path / "artifacts"),
-        embedding_service=embedding,
-        source_registry=_registry(tmp_path),
-        index_elasticsearch=True,
-    ).build(docs)
-
-    assert len(embedding.calls) == 1
-    assert keyword_calls == [
-        ("pcs-memo", ["memo-1", "memo-2"]),
-        ("pcs-album", ["album-1"]),
-        ("pcs-photo", ["photo-1"]),
-    ]
