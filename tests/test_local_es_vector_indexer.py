@@ -36,7 +36,7 @@ def _doc(doc_id: str, system_id: str) -> SourceDoc:
     )
 
 
-def test_rebuild_creates_one_dense_vector_index_for_all_sources() -> None:
+def test_rebuild_creates_minimal_dense_vector_index_for_all_sources() -> None:
     indexer = RecordingVectorIndexer()
     docs = [_doc("same-id", "memo"), _doc("same-id", "photo")]
     embeddings = np.asarray(
@@ -49,11 +49,10 @@ def test_rebuild_creates_one_dense_vector_index_for_all_sources() -> None:
     put_request = next(item for item in indexer.requests if item[:2] == ("PUT", "/vectors-test"))
     mapping = put_request[2]
     assert mapping is not None
-    assert mapping["mappings"]["properties"]["embedding"] == {
-        "type": "dense_vector",
-        "dims": 4,
-    }
-    assert mapping["mappings"]["properties"]["system_id"] == {"type": "keyword"}
+    properties = mapping["mappings"]["properties"]
+    assert set(properties) == {"doc_id", "system_id", "embedding"}
+    assert properties["embedding"] == {"type": "dense_vector", "dims": 4}
+    assert properties["system_id"] == {"type": "keyword"}
 
     bulk_request = next(item for item in indexer.raw_requests if item[1] == "/_bulk")
     body = bulk_request[2]
@@ -61,8 +60,14 @@ def test_rebuild_creates_one_dense_vector_index_for_all_sources() -> None:
     lines = [json.loads(line) for line in body.strip().splitlines()]
 
     assert lines[0]["index"]["_id"] == "memo:same-id"
-    assert lines[1]["system_id"] == "memo"
-    assert lines[1]["embedding"] == [1.0, 0.0, 0.0, 0.0]
+    assert lines[1] == {
+        "doc_id": "same-id",
+        "system_id": "memo",
+        "embedding": [1.0, 0.0, 0.0, 0.0],
+    }
     assert lines[2]["index"]["_id"] == "photo:same-id"
-    assert lines[3]["system_id"] == "photo"
-    assert lines[3]["embedding"] == [0.0, 1.0, 0.0, 0.0]
+    assert lines[3] == {
+        "doc_id": "same-id",
+        "system_id": "photo",
+        "embedding": [0.0, 1.0, 0.0, 0.0],
+    }
