@@ -1,12 +1,10 @@
 import json
-import math
 from pathlib import Path
 
 import pytest
 
 from app.embedding.embedding_service import MockEmbeddingService
 from app.offline.local_index_builder import LocalIndexBuilder
-from app.retrieval.local_faiss_retriever import LocalFaissRetriever
 from app.schemas.doc import SourceDoc
 from app.source_registry import SourceRegistry
 from app.storage.local_artifact_store import LocalArtifactStore
@@ -22,16 +20,16 @@ class CountingEmbeddingService(MockEmbeddingService):
         return await super().embed_batch(texts)
 
 
-def _memo_doc() -> SourceDoc:
+def _doc(doc_id: str, system_id: str) -> SourceDoc:
     return SourceDoc(
-        doc_id="memo_doc_001",
-        system_id="memo",
-        summary="The memo records a shanghai business trip meeting plan.",
-        keywords=["memo", "shanghai", "meeting"],
+        doc_id=doc_id,
+        system_id=system_id,
+        summary=f"summary for {system_id}",
+        keywords=[system_id],
     )
 
 
-def _source(index: str, source_id: str, root) -> dict:
+def _source(index: str, source_id: str, root: Path) -> dict:
     return {
         "es_index": index,
         "faiss_index_path": str(root / source_id / "faiss.index"),
@@ -50,15 +48,16 @@ def _source(index: str, source_id: str, root) -> dict:
     }
 
 
-def _registry(tmp_path) -> SourceRegistry:
+def _registry(tmp_path: Path) -> SourceRegistry:
     path = tmp_path / "sources.json"
-    faiss_root = tmp_path / "faiss"
+    root = tmp_path / "faiss"
     path.write_text(
         json.dumps(
             {
                 "sources": {
-                    "memo": _source("pcs-memo", "memo", faiss_root),
-                    "album": _source("pcs-album", "album", faiss_root),
+                    "memo": _source("pcs-memo", "memo", root),
+                    "album": _source("pcs-album", "album", root),
+                    "photo": _source("pcs-photo", "photo", root),
                 }
             }
         ),
@@ -68,64 +67,98 @@ def _registry(tmp_path) -> SourceRegistry:
 
 
 @pytest.mark.asyncio
-async def test_builder_uses_one_legacy_embedding_call_for_one_source(tmp_path) -> None:
-    registry = _registry(tmp_path)
-    source = registry.require("memo")
-    store = LocalArtifactStore(artifact_dir=Path(source.faiss_index_path).parent)
+async def test_builder_embeds_all_sources_once_and_builds_one_vector_index(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    vector_calls: list[tuple[list[tuple[str, str]], tuple[int, int]]] = []
+
+    class FakeVectorIndexer:
+        def rebuild(self, docs, embeddings) -> None:
+            vector_calls.append(
+                (
+                    [(doc.system_id, doc.doc_id) for doc in docs],
+                    tuple(embeddings.shape),
+                )
+            )
+
+    monkeypatch.setattr(
+        "app.offline.local_index_builder.LocalElasticsearchVectorIndexer",
+        FakeVectorIndexer,
+    )
+
+    docs = [
+        _doc("memo-1", "memo"),
+        _doc("album-1", "album"),
+        _doc("photo-1", "photo"),
+    ]
     embedding = CountingEmbeddingService(dim=16)
+    store = LocalArtifactStore(artifact_dir=tmp_path / "artifacts")
 
     result = await LocalIndexBuilder(
-        source=source,
         artifact_store=store,
         embedding_service=embedding,
-    ).build([_memo_doc()])
+        source_registry=_registry(tmp_path),
+    ).build(docs)
 
-    assert result.doc_count == 1
-    assert result.source_count == 1
-    assert result.embedding_dim == 16
     assert len(embedding.calls) == 1
-    assert len(embedding.calls[0]) == 1
+    assert len(embedding.calls[0]) == 3
+    assert vector_calls == [
+        ([('memo', 'memo-1'), ('album', 'album-1'), ('photo', 'photo-1')], (3, 16))
+    ]
+    assert result.doc_count == 3
+    assert result.source_count == 3
+    assert result.embedding_dim == 16
+    assert result.vector_index == "pcs_retrieval_vectors"
     assert store.docs_path.exists()
     assert store.manifest_path.exists()
 
-    index, doc_ids = store.load_faiss(
-        index_path=source.faiss_index_path,
-        doc_ids_path=source.faiss_doc_ids_path,
-    )
-    assert doc_ids == ["memo_doc_001"]
-    assert int(index.ntotal) == 1
-
-    hits = await LocalFaissRetriever(
-        source_id="memo",
-        faiss_index_path=source.faiss_index_path,
-        faiss_doc_ids_path=source.faiss_doc_ids_path,
-        artifact_store=store,
-        embedding_service=embedding,
-    ).search("shanghai trip meeting", top_k=5)
-    assert [hit.doc_id for hit in hits] == ["memo_doc_001"]
-    assert hits[0].vector_score is not None and math.isfinite(hits[0].vector_score)
-
 
 @pytest.mark.asyncio
-async def test_builder_rebuilds_only_selected_source_es_index(monkeypatch, tmp_path) -> None:
-    calls: list[tuple[str, list[str]]] = []
+async def test_builder_can_rebuild_keyword_indices_per_source_without_reembedding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    keyword_calls: list[tuple[str, list[str]]] = []
 
-    class FakeIndexer:
+    class FakeVectorIndexer:
+        def rebuild(self, docs, embeddings) -> None:
+            pass
+
+    class FakeKeywordIndexer:
         def __init__(self, index_name: str) -> None:
             self.index_name = index_name
 
         def rebuild(self, docs: list[SourceDoc]) -> None:
-            calls.append((self.index_name, [doc.doc_id for doc in docs]))
+            keyword_calls.append((self.index_name, [doc.doc_id for doc in docs]))
 
-    monkeypatch.setattr("app.offline.local_index_builder.LocalElasticsearchIndexer", FakeIndexer)
-    registry = _registry(tmp_path)
-    source = registry.require("memo")
+    monkeypatch.setattr(
+        "app.offline.local_index_builder.LocalElasticsearchVectorIndexer",
+        FakeVectorIndexer,
+    )
+    monkeypatch.setattr(
+        "app.offline.local_index_builder.LocalElasticsearchIndexer",
+        FakeKeywordIndexer,
+    )
+
+    embedding = CountingEmbeddingService(dim=8)
+    docs = [
+        _doc("memo-1", "memo"),
+        _doc("memo-2", "memo"),
+        _doc("album-1", "album"),
+        _doc("photo-1", "photo"),
+    ]
 
     await LocalIndexBuilder(
-        source=source,
-        artifact_store=LocalArtifactStore(artifact_dir=Path(source.faiss_index_path).parent),
-        embedding_service=MockEmbeddingService(dim=8),
+        artifact_store=LocalArtifactStore(artifact_dir=tmp_path / "artifacts"),
+        embedding_service=embedding,
+        source_registry=_registry(tmp_path),
         index_elasticsearch=True,
-    ).build([_memo_doc()])
+    ).build(docs)
 
-    assert calls == [("pcs-memo", ["memo_doc_001"])]
+    assert len(embedding.calls) == 1
+    assert keyword_calls == [
+        ("pcs-memo", ["memo-1", "memo-2"]),
+        ("pcs-album", ["album-1"]),
+        ("pcs-photo", ["photo-1"]),
+    ]
