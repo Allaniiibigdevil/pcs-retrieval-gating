@@ -85,6 +85,15 @@ class GTEReranker:
         self._load_lock = Lock()
         self._inference_lock = Lock()
 
+    async def score(self, query: str, doc: str) -> float:
+        scores = await asyncio.to_thread(self._predict, query, [doc])
+        if len(scores) != 1:
+            raise ValueError("Reranker returned a different number of scores than expected")
+        score = float(scores[0])
+        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+            raise ValueError(f"Reranker returned an invalid probability: {score}")
+        return score
+
     async def rerank(
         self,
         query: str,
