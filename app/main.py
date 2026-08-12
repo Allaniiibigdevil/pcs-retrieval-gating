@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import decision, search
+from app.api import decision, embedding, search
 from app.config import get_settings
 from app.logging_config import configure_logging
 
@@ -20,6 +20,7 @@ async def health() -> dict[str, str]:
 
 app.include_router(search.router)
 app.include_router(decision.router)
+app.include_router(embedding.router)
 
 frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 if frontend_dir.exists():
