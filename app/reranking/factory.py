@@ -6,6 +6,9 @@ from app.schemas.search import SearchHit
 
 
 class Reranker(Protocol):
+    async def score(self, query: str, doc: str) -> float:
+        ...
+
     async def rerank(
         self,
         query: str,
