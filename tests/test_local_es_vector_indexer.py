@@ -36,7 +36,7 @@ def _doc(doc_id: str, system_id: str) -> SourceDoc:
     )
 
 
-def test_rebuild_creates_minimal_dense_vector_index_for_all_sources() -> None:
+def test_rebuild_creates_dense_vector_index_with_unindexed_summary() -> None:
     indexer = RecordingVectorIndexer()
     docs = [_doc("same-id", "memo"), _doc("same-id", "photo")]
     embeddings = np.asarray(
@@ -50,7 +50,8 @@ def test_rebuild_creates_minimal_dense_vector_index_for_all_sources() -> None:
     mapping = put_request[2]
     assert mapping is not None
     properties = mapping["mappings"]["properties"]
-    assert set(properties) == {"doc_id", "system_id", "embedding"}
+    assert set(properties) == {"doc_id", "system_id", "summary", "embedding"}
+    assert properties["summary"] == {"type": "text", "index": False}
     assert properties["embedding"] == {"type": "dense_vector", "dims": 4}
     assert properties["system_id"] == {"type": "keyword"}
 
@@ -63,11 +64,13 @@ def test_rebuild_creates_minimal_dense_vector_index_for_all_sources() -> None:
     assert lines[1] == {
         "doc_id": "same-id",
         "system_id": "memo",
+        "summary": "summary memo",
         "embedding": [1.0, 0.0, 0.0, 0.0],
     }
     assert lines[2]["index"]["_id"] == "photo:same-id"
     assert lines[3] == {
         "doc_id": "same-id",
         "system_id": "photo",
+        "summary": "summary photo",
         "embedding": [0.0, 1.0, 0.0, 0.0],
     }
