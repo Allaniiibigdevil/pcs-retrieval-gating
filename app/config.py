@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,9 @@ class Settings(BaseSettings):
     LOCAL_ES_SUMMARY_BOOST: float = Field(default=1.0, gt=0.0)
     LOCAL_ES_KEYWORDS_BOOST: float = Field(default=1.0, gt=0.0)
     LOCAL_ES_BULK_BATCH_SIZE: int = Field(default=1000, ge=1, le=100000)
+
+    KEYWORD_RETRIEVER_MODE: Literal["per_source", "unified"] = "per_source"
+    VECTOR_RETRIEVER_BACKEND: Literal["faiss", "es"] = "faiss"
 
     EMBEDDING_PROVIDER: str = "bge"
     EMBEDDING_MODEL_PATH: str = "BAAI/bge-small-zh-v1.5"
